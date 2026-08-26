@@ -1,0 +1,23 @@
+# 建置產物
+build/
+*.o
+*.d
+*.elf
+*.img
+*.map
+*.bin
+
+# 日誌
+*.log
+
+# 編輯器與工具
+.vscode/
+.idea/
+compile_commands.json
+.cache/
+tags
+TAGS
+
+# 作業系統
+.DS_Store
+Thumbs.db

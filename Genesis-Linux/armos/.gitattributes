@@ -1,0 +1,8 @@
+# 強制所有原始碼使用 LF。組合語言與 linker script 對 CRLF 特別敏感，
+# 而本專案在 Windows + WSL2 環境開發，容易混入 CRLF。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.img binary
+*.bin binary
