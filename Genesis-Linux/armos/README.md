@@ -38,18 +38,45 @@ sudo apt install gcc-aarch64-linux-gnu qemu-system-arm \
 四樣東西各自的用途：交叉編譯器（在 x86-64 上產生 ARM64 的碼）、模擬器、除錯器
 （一般的 `gdb` 認不得 aarch64 目標）、以及讀 device tree 用的工具。
 
-本專案目前在這組版本上開發與量測：
+裝好之後跑一次：
+
+```bash
+make check-env
+```
+
+```
+檢查工具鏈（CROSS=aarch64-linux-gnu-）
+
+  [就緒] aarch64-linux-gnu-gcc      11.4.0
+  [就緒] aarch64-linux-gnu-ld       2.38
+  [就緒] aarch64-linux-gnu-objdump  2.38
+  [就緒] aarch64-linux-gnu-readelf  2.38
+  [就緒] qemu-system-aarch64        6.2.0
+  [就緒] gdb-multiarch              12.1
+  [就緒] dtc                        1.6.1
+  [就緒] ss                         5.15.0
+
+工具齊備，版本與文件一致。
+```
+
+缺工具會列出全部缺的並回傳失敗；版本與文件不同只會提醒，核心照樣建得起來。
+
+之所以要比對版本，是因為文件裡有大量實測數值（ELF 大小、斷點位址、section 對齊），
+而這些數字會隨工具版本改變 —— `ld` 的孤兒 section 擺放規則、`gdb` 的 prologue 判斷、
+預設頁大小三者都是。**版本不同時不會有任何錯誤訊息**，照著文件做的人只會發現數字
+對不上，卻不知道為什麼。本專案的量測環境是：
 
 ```
 binutils 2.38 / gcc 11.4.0 / QEMU 6.2.0 / gdb 12.1  (Ubuntu 22.04)
 ```
 
-版本不必完全一樣，但差太多的話文件裡的數值可能對不上 —— `ld` 的孤兒 section 擺放
-規則、`gdb` 的 prologue 判斷、預設頁大小三者都會隨版本改變。
+若工具鏈的前綴不是 `aarch64-linux-gnu-`（有些發行版是 `aarch64-none-elf-`），
+改 Makefile 開頭的 `CROSS` 即可，`check-env` 會跟著走。
 
 ## 怎麼用
 
 ```bash
+make check-env  # 檢查工具鏈是否齊備
 make            # 建置（零警告，本專案使用 -Werror）
 make dump       # 反組譯 + ELF header + program header
 make qemu       # 在 QEMU 上執行（離開：先按 Ctrl-A，放開，再按 X）

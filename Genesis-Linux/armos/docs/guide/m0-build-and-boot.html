@@ -90,14 +90,23 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
 <pre><code>sudo apt install gcc-aarch64-linux-gnu qemu-system-arm \
                  gdb-multiarch device-tree-compiler make</code></pre>
 
-<p>裝好之後確認一下（版本不必完全一樣，但差太多的話本文的數字可能對不上）：</p>
+<p>裝好之後跑一次專案內建的檢查，不必自己一個一個比對：</p>
 
-<pre><code>$ aarch64-linux-gnu-gcc --version | head -1
-aarch64-linux-gnu-gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
-$ qemu-system-aarch64 --version | head -1
-QEMU emulator version 6.2.0 (Debian 1:6.2+dfsg-2ubuntu6.31)
-$ gdb-multiarch --version | head -1
-GNU gdb (Ubuntu 12.1-0ubuntu1~22.04.2) 12.1</code></pre>
+<pre><code>$ make check-env
+檢查工具鏈（CROSS=aarch64-linux-gnu-）
+
+  [就緒] aarch64-linux-gnu-gcc      11.4.0
+  [就緒] aarch64-linux-gnu-ld       2.38
+  [就緒] aarch64-linux-gnu-objdump  2.38
+  [就緒] aarch64-linux-gnu-readelf  2.38
+  [就緒] qemu-system-aarch64        6.2.0
+  [就緒] gdb-multiarch              12.1
+  [就緒] dtc                        1.6.1
+  [就緒] ss                         5.15.0
+
+工具齊備，版本與文件一致。</code></pre>
+
+<p>缺工具的話它會<strong>一次列出全部缺的</strong>並回傳失敗；版本與本文不同則只會提醒，核心照樣建得起來 —— 只是第 6 節那些實測數值要自己重新量。</p>
 
 <p><strong>為什麼是交叉編譯器？</strong>你的電腦大概是 x86-64，而目標是 ARM64。<code>aarch64-linux-gnu-</code> 這個前綴的意思就是「在這台機器上跑，但產生 ARM64 的碼」。名字裡雖然有 <code>linux-gnu</code>，我們靠 <code>-nostdlib</code> 把它跟 Linux 的部分切乾淨。</p>
 

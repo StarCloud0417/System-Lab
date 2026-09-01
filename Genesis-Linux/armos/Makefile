@@ -4,14 +4,17 @@
 #   §2 動手步驟　§3 產物怎麼來的　§5 旗標逐條　§6 實測數據　§7 被推翻的直覺
 # 註解裡的數值量於 binutils 2.38 / gcc 11.4.0 / QEMU 6.2.0 / gdb 12.1
 
+# 有些發行版的裸機工具鏈叫 aarch64-none-elf-；改這裡，check-env 會跟著走
 CROSS   := aarch64-linux-gnu-
 CC      := $(CROSS)gcc
 OBJDUMP := $(CROSS)objdump
 READELF := $(CROSS)readelf
 QEMU    := qemu-system-aarch64
-GDB     := gdb-multiarch            # Debian/Ubuntu 的套件名
+# gdb-multiarch 是 Debian/Ubuntu 的套件名；一般的 gdb 認不得 aarch64 目標
+GDB     := gdb-multiarch
 
-SRC := kernel/boot.S                # 大寫 .S 才會過 C 前處理器
+# 大寫 .S 才會過 C 前處理器（小寫 .s 不會）
+SRC := kernel/boot.S
 LD  := linker/kernel-qemu.ld
 
 # 每個旗標對應一個「拿掉就會出現」的失敗：
@@ -31,6 +34,10 @@ build/kernel.elf: $(SRC) $(LD) | build
 
 build:
 	mkdir -p build
+
+# 檢查工具鏈。缺工具會失敗，版本與文件不同只提醒。
+check-env:
+	@CROSS='$(CROSS)' bash scripts/check-env.sh
 
 # 核心還不會輸出任何字，這是唯一的靜態檢查手段
 dump: build/kernel.elf
@@ -67,4 +74,4 @@ dtb: | build
 clean:
 	rm -rf build
 
-.PHONY: all dump qemu debug dtb clean
+.PHONY: all check-env dump qemu debug dtb clean
