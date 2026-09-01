@@ -1,0 +1,786 @@
+<title>M0：從零到第一條指令</title>
+<style>
+:root{
+  --bg:#fbfaf8; --fg:#1c1b19; --muted:#6b6862; --rule:#e0ddd6;
+  --card:#ffffff; --code-bg:#f4f2ee; --accent:#8a4b2a; --accent-soft:#f0e6df;
+  --ram:#7a9a6b; --mmio:#b08442; --kern:#8a4b2a;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#17181a; --fg:#e6e4e0; --muted:#9a968e; --rule:#2e3033;
+    --card:#1e2023; --code-bg:#232629; --accent:#d99b6c; --accent-soft:#2b2320;
+    --ram:#8fb07e; --mmio:#c9a05c; --kern:#d99b6c;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0; padding:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,"Segoe UI","Noto Sans TC","PingFang TC",sans-serif;
+  line-height:1.85; font-size:16.5px;
+}
+.wrap{max-width:820px;margin:0 auto;padding:56px 24px 96px}
+header{border-bottom:2px solid var(--fg);padding-bottom:22px;margin-bottom:8px}
+.kicker{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+h1{font-size:2.1rem;line-height:1.25;margin:0 0 12px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0;font-size:1rem}
+h2{font-size:1.28rem;margin:56px 0 4px;padding-top:24px;border-top:1px solid var(--rule);letter-spacing:-.005em}
+h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:.5em;font-weight:600}
+h3{font-size:1rem;margin:32px 0 8px;color:var(--accent)}
+p{margin:14px 0}
+ul,ol{margin:14px 0;padding-left:1.4em}
+li{margin:7px 0}
+code{font-family:"SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+  font-size:.87em;background:var(--code-bg);padding:.12em .4em;border-radius:4px}
+pre{background:var(--code-bg);border:1px solid var(--rule);border-radius:8px;
+  padding:16px 18px;overflow-x:auto;margin:18px 0;line-height:1.6}
+pre code{background:none;padding:0;font-size:.83rem}
+.tbl{overflow-x:auto;margin:18px 0}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+td code{white-space:nowrap}
+figure{margin:28px 0}
+figcaption{font-size:.82rem;color:var(--muted);margin-top:10px;text-align:center}
+svg{display:block;max-width:100%;height:auto;margin:0 auto}
+.callout{background:var(--card);border:1px solid var(--rule);border-left:3px solid var(--accent);
+  border-radius:0 8px 8px 0;padding:16px 20px;margin:22px 0}
+.callout .lbl{font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);
+  font-weight:700;display:block;margin-bottom:6px}
+.callout p{margin:8px 0}
+.callout p:first-of-type{margin-top:0}
+.callout p:last-child{margin-bottom:0}
+.myth{border-left-color:var(--mmio)}
+.myth .lbl{color:var(--mmio)}
+.cheat{background:var(--accent-soft);border:1px solid var(--rule);border-radius:10px;padding:6px 24px 20px;margin:24px 0}
+.cheat h3{margin-top:20px}
+footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
+  font-size:.83rem;color:var(--muted)}
+.q{font-weight:600;margin-top:22px}
+</style>
+
+<div class="wrap">
+<header>
+  <p class="kicker">armos · 里程碑 M0</p>
+  <h1>從零到第一條指令</h1>
+  <p class="sub">一個 12 bytes 的核心，怎麼被建置出來、被載到 0x4000_0000、然後真的被 CPU 執行</p>
+</header>
+
+<h2><span class="num">1</span>要解決什麼問題</h2>
+
+<p>目標小得有點荒謬：讓一顆 ARM64 的 CPU 執行三條我們自己寫的指令，並且<strong>能證明它真的執行了</strong>。</p>
+
+<p>沒有作業系統、沒有 bootloader、沒有 C 標準函式庫、沒有 <code>printf</code>。難的不是那三條指令，是<strong>它們周圍的一切都不存在</strong>：</p>
+
+<ul>
+  <li>平常寫程式，作業系統的 loader 會決定程式放在記憶體哪裡。現在沒有 loader，位址要自己決定——而且要跟硬體對得上。</li>
+  <li>平常 <code>main()</code> 會被自動呼叫。現在沒有人會呼叫任何東西，得自己指定第一條指令在哪。</li>
+  <li>平常程式錯了會 segfault、會有錯誤訊息。現在錯了就是一片黑，沒有任何回饋。</li>
+</ul>
+
+<p>所以 M0 真正要建立的，是一條<strong>看得見的回饋迴路</strong>：改一行 → 建置 → 跑起來 → 看得到差異。這條迴路建立不起來，後面每個里程碑都是在瞎猜。</p>
+
+<h2><span class="num">2</span>動手：建置與觀察</h2>
+
+<p>後面幾節都在解釋原理，但原理讀十遍不如親眼看一次。這一節是一份可以照著打的操作步驟，六步做完大約十分鐘，你會親眼看到這個核心被建置、被載入、以及<strong>被 CPU 執行</strong>。建議先做完這一節，再回頭讀第 3 節之後的說明。</p>
+
+<h3>步驟 0：準備工具</h3>
+
+<p>四樣東西：交叉編譯器、模擬器、除錯器、device tree 工具。Ubuntu / Debian 上：</p>
+
+<pre><code>sudo apt install gcc-aarch64-linux-gnu qemu-system-arm \
+                 gdb-multiarch device-tree-compiler make</code></pre>
+
+<p>裝好之後確認一下（版本不必完全一樣，但差太多的話本文的數字可能對不上）：</p>
+
+<pre><code>$ aarch64-linux-gnu-gcc --version | head -1
+aarch64-linux-gnu-gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
+$ qemu-system-aarch64 --version | head -1
+QEMU emulator version 6.2.0 (Debian 1:6.2+dfsg-2ubuntu6.31)
+$ gdb-multiarch --version | head -1
+GNU gdb (Ubuntu 12.1-0ubuntu1~22.04.2) 12.1</code></pre>
+
+<p><strong>為什麼是交叉編譯器？</strong>你的電腦大概是 x86-64，而目標是 ARM64。<code>aarch64-linux-gnu-</code> 這個前綴的意思就是「在這台機器上跑，但產生 ARM64 的碼」。名字裡雖然有 <code>linux-gnu</code>，我們靠 <code>-nostdlib</code> 把它跟 Linux 的部分切乾淨。</p>
+
+<h3>步驟 1：建置</h3>
+
+<pre><code>$ cd Genesis-Linux/armos
+$ make
+mkdir -p build
+aarch64-linux-gnu-gcc -Wall -Wextra -Werror -ffreestanding -nostdlib -static \
+    -Wl,-T,linker/kernel-qemu.ld -Wl,--build-id=none -o build/kernel.elf kernel/boot.S</code></pre>
+
+<p><strong>應該看到：</strong>就這兩行，沒有別的。本專案開著 <code>-Werror</code>，任何警告都會變成錯誤，所以「安靜」就是成功。</p>
+
+<p><strong>沒看到的話：</strong><code>command not found</code> 代表步驟 0 沒裝完；<code>Nothing to be done for 'all'</code> 代表已經建過了，先 <code>make clean</code>。</p>
+
+<h3>步驟 2：看看做出了什麼</h3>
+
+<pre><code>$ make dump</code></pre>
+
+<p>輸出有點長，只要盯三個地方：</p>
+
+<div class="tbl">
+<table>
+<tr><th>看哪裡</th><th>應該是</th><th>意思</th></tr>
+<tr><td>反組譯</td><td>只有 3 條指令，從 <code>0000000040000000 &lt;_start&gt;</code> 開始</td><td>程式碼落在對的位址</td></tr>
+<tr><td><code>Entry point address</code></td><td><code>0x40000000</code></td><td>QEMU 會從這裡開始執行</td></tr>
+<tr><td><code>LOAD</code> 那行的 <code>PhysAddr</code></td><td><code>0x40000000</code></td><td>QEMU 會把內容搬到這裡</td></tr>
+</table>
+</div>
+
+<p>這三個數字一致，代表「要放的位置」和「要跳的位置」對上了。核心還不會輸出任何字，這是這個階段唯一的靜態檢查手段。</p>
+
+<h3>步驟 3：跑起來（畫面會是黑的）</h3>
+
+<pre><code>$ make qemu</code></pre>
+
+<p><strong>應該看到：一片空白。</strong>這是正確的——UART 驅動要到 M1 才有，現在的核心沒有任何輸出能力。</p>
+
+<p><strong>離開方式：先按 <code>Ctrl-A</code>，放開，再按 <code>X</code>。</strong>（不是同時按三個鍵。<code>Ctrl-A</code> 是 QEMU 的跳脫鍵，按完之後它會等你下一個指令。）</p>
+
+<p>這一步唯一能確認的是「QEMU 沒有報錯就退出」。至於 CPU 到底有沒有在執行，看不出來——這正是下一步存在的理由。</p>
+
+<h3>步驟 4：證明 CPU 真的在執行 ← 這是本里程碑的驗收</h3>
+
+<pre><code>$ make debug</code></pre>
+
+<p><strong>應該看到：</strong></p>
+
+<pre><code>0x0000000040000000 in _start ()
+Breakpoint 1 at 0x40000008
+
+Breakpoint 1, 0x0000000040000008 in halt_loop ()
+$1 = 1
+
+Breakpoint 1, 0x0000000040000008 in halt_loop ()
+$2 = 2
+(gdb)</code></pre>
+
+<p><strong><code>$1</code> 和 <code>$2</code> 是不同的值 —— 過關。</strong>這兩個數字證明了兩件事：映像確實被載進去了（不然斷點不會命中），而且 CPU 確實在執行我們寫的指令（不然 x0 不會變）。</p>
+
+<p>停在 <code>(gdb)</code> 之後可以自己繼續看：</p>
+
+<pre><code>(gdb) c                繼續，再停一次（x0 會是 3）
+(gdb) p $x0            印暫存器
+(gdb) p/x $cpsr        0x400003c5 —— 開機時的處理器狀態
+(gdb) info threads     確認只有一顆核心
+(gdb) x/3i $pc         看目前位置的三條指令
+(gdb) q                離開（QEMU 會被一起收掉）</code></pre>
+
+<p><strong>出問題的話：</strong>如果它說 <code>port 1234 已被佔用</code>，代表上一隻 QEMU 沒關乾淨，執行 <code>pkill -f qemu-system-aarch64</code> 再試。這個守衛很重要——沒有它的話 GDB 會靜默連上舊的那一隻，畫面變成「指令是舊映像的、符號名是新 ELF 的」，而且不會有任何錯誤訊息。</p>
+
+<h3>步驟 5：查平台位址的出處</h3>
+
+<pre><code>$ make dtb | grep -A3 'memory@'
+memory@40000000 {
+    reg = &lt;0x00 0x40000000 0x00 0x8000000&gt;;
+    device_type = "memory";
+};</code></pre>
+
+<p>這就是 <code>0x4000_0000</code> 的來源，不是慣例也不是抄來的。第 4 節會解釋這四個數字怎麼讀。</p>
+
+<h3>步驟 6：動手把它弄壞（最重要的一步）</h3>
+
+<p>前五步都在確認「一切正常」。但真正學到東西的方式是<strong>故意弄壞，然後看症狀</strong>——因為裸機開發沒有 segfault 幫你擋，你唯一的技能就是從症狀反推原因。</p>
+
+<p>下面四個實驗每個一分鐘，全部可以用 <code>git checkout .</code> 復原（改壞之前記得先確認工作目錄是乾淨的）。</p>
+
+<div class="tbl">
+<table>
+<tr><th>#</th><th>做什麼</th><th>然後看</th><th>你會看到</th></tr>
+<tr><td>1</td><td>把 <code>linker/kernel-qemu.ld</code> 裡的 <code>0x40000000</code> 改成 <code>0x41000000</code></td><td><code>make &amp;&amp; make dump</code></td><td><code>_start</code> 跑到 <code>0x41000000</code>，entry point 也跟著變。<strong>不需要 make clean</strong>——因為 Makefile 把 linker script 列進了相依項</td></tr>
+<tr><td>2</td><td>把 <code>kernel/boot.S</code> 的 <code>.text.boot</code> 拼錯成 <code>.txet.boot</code></td><td><code>make clean &amp;&amp; make</code></td><td><strong>零警告、零錯誤，而且照樣開得起來。</strong>這是 M0 最重要的一課：建置成功不等於做對了</td></tr>
+<tr><td>3</td><td>把 <code>Makefile</code> 的 <code>-Wl,--build-id=none</code> 拿掉</td><td><code>make clean &amp;&amp; make dump</code></td><td>entry point 變成 <code>0x40000024</code>，多了一個 <code>.note.gnu.build-id</code> 卡在前面</td></tr>
+<tr><td>4</td><td>在 <code>Makefile</code> 的 <code>WARN</code> 後面加上 <code>-g</code></td><td><code>make clean &amp;&amp; make debug</code></td><td>斷點從 <code>0x40000008</code> 跑回 <code>0x40000004</code>，第一次停時 <code>$1 = 0</code></td></tr>
+</table>
+</div>
+
+<p>這四個實驗分別對應第 7 節的直覺 2、直覺 3、直覺 4。做完之後再去讀那一節，感受會完全不同——因為那些不再是別人的結論，是你自己看過的現象。</p>
+
+<div class="callout">
+<span class="lbl">復原</span>
+<p><code>git checkout .</code> 把改動全部丟掉，<code>make clean &amp;&amp; make</code> 重建。如果你想留著實驗，改用 <code>git stash</code>。</p>
+</div>
+
+<h2><span class="num">3</span>完整路徑</h2>
+
+<p>從一個 <code>.S</code> 檔到 CPU 執行，中間經過這些人的手：</p>
+
+<figure>
+<svg viewBox="0 0 760 290" role="img" aria-label="建置與載入流程圖">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+      <path d="M0,0 L7,3.2 L0,6.4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+    </marker>
+  </defs>
+  <g font-family="ui-monospace,monospace" font-size="12" fill="currentColor">
+
+    <g stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#ar)" opacity=".65">
+      <line x1="128" y1="48" x2="172" y2="48"/>
+      <line x1="282" y1="48" x2="326" y2="48"/>
+      <line x1="436" y1="48" x2="480" y2="48"/>
+      <line x1="556" y1="72"  x2="556" y2="106"/>
+      <line x1="556" y1="158" x2="556" y2="194"/>
+    </g>
+
+    <g fill="none" stroke="currentColor" stroke-width="1.2" opacity=".45">
+      <rect x="24"  y="30" width="104" height="36" rx="6"/>
+      <rect x="178" y="30" width="104" height="36" rx="6"/>
+      <rect x="332" y="30" width="104" height="36" rx="6"/>
+    </g>
+    <rect x="486" y="24" width="140" height="48" rx="6" fill="none" stroke="currentColor" stroke-width="1.8"/>
+    <rect x="451" y="112" width="210" height="46" rx="6" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".55"/>
+    <rect x="421" y="200" width="270" height="50" rx="6" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+
+    <text x="76"  y="47" text-anchor="middle">boot.S</text>
+    <text x="76"  y="60" text-anchor="middle" font-size="10" opacity=".6">大寫 .S</text>
+    <text x="230" y="47" text-anchor="middle">cc1 -E</text>
+    <text x="230" y="60" text-anchor="middle" font-size="10" opacity=".6">前處理</text>
+    <text x="384" y="47" text-anchor="middle">as</text>
+    <text x="384" y="60" text-anchor="middle" font-size="10" opacity=".6">組譯</text>
+    <text x="556" y="41" text-anchor="middle" font-weight="700">ld</text>
+    <text x="556" y="53" text-anchor="middle" font-size="10" opacity=".7">經 collect2 叫起</text>
+    <text x="556" y="65" text-anchor="middle" font-size="10" opacity=".7">+ kernel-qemu.ld</text>
+
+    <text x="556" y="131" text-anchor="middle">build/kernel.elf</text>
+    <text x="556" y="147" text-anchor="middle" font-size="10" opacity=".65">e_entry = 0x40000000</text>
+
+    <text x="556" y="221" text-anchor="middle" fill="var(--accent)" font-weight="700">QEMU 當 ELF loader</text>
+    <text x="556" y="238" text-anchor="middle" font-size="10" fill="var(--accent)" opacity=".85">搬 PT_LOAD → PC 設到進入點</text>
+
+    <text x="30" y="106" font-size="10.5" opacity=".7">上面四格由左往右，</text>
+    <text x="30" y="122" font-size="10.5" opacity=".7">產物出來之後一路往下。</text>
+    <text x="30" y="152" font-size="10.5" opacity=".7">gcc 一件事都沒做，</text>
+    <text x="30" y="168" font-size="10.5" opacity=".7">它只是依序叫起這四個程式</text>
+    <text x="30" y="184" font-size="10.5" opacity=".7">（driver／排程者）。</text>
+    <text x="30" y="214" font-size="10.5" opacity=".7">-Wl, 開頭的旗標，</text>
+    <text x="30" y="230" font-size="10.5" opacity=".7">是轉交給 ld 的。</text>
+  </g>
+</svg>
+<figcaption>gcc 在這裡不是編譯器，是流程的排程者（driver）；真正決定位址的是 ld 和我們給它的 linker script</figcaption>
+</figure>
+
+
+<div class="callout">
+<span class="lbl">圖上為什麼寫 cc1 -E，不是 gcc、也不是 cpp</span>
+<p><code>gcc</code> 本身<strong>不做</strong>前處理、組譯或連結，它是個 <em>driver</em>（排程者）：解析你給的旗標，決定該依序叫起哪些真正幹活的程式。用 <code>-v</code> 就能看到它實際叫了誰：</p>
+<pre style="margin:10px 0"><code>$ aarch64-linux-gnu-gcc -v -c kernel/boot.S
+ .../11/cc1 -E -lang-asm ... kernel/boot.S -o /tmp/ccIduG8y.s
+ .../aarch64-linux-gnu/bin/as -EL -mabi=lp64 -o ... /tmp/ccIduG8y.s</code></pre>
+<p>所以前處理是 <code>cc1</code> 用 <code>-E -lang-asm</code> 模式做的。至於 <code>cpp</code> —— 系統上確實有這個執行檔（<code>/usr/bin/aarch64-linux-gnu-cpp</code>），但它自己也只是另一個 driver，內部同樣是跑 <code>cc1 -E</code>。<strong>gcc 處理 <code>.S</code> 時不會繞過去叫 <code>cpp</code>。</strong>「cpp」是這個<em>階段</em>的通稱，不是這裡被執行的<em>程式</em>。</p>
+<p>連結那一格同理：gcc 叫的是 <code>collect2</code>，由它再去叫 <code>ld</code>。圖上直接寫 <code>ld</code> 是因為 <code>collect2</code> 在這個專案裡不做任何額外的事，但知道中間還隔了一層，看 <code>-v</code> 的輸出時才不會困惑。</p>
+</div>
+
+<h3>build/kernel.elf 是怎麼來的</h3>
+
+<p>只有一個原始檔，所以整個建置就是一條命令，沒有中間的 <code>.o</code>。用 <code>make -n</code>（只印不做）可以看到 make 實際會執行什麼。<strong>如果它回你 <code>Nothing to be done for 'all'</code>，那不是壞掉</strong>，是產物已經是最新的——先 <code>make clean</code>，或改用 <code>make -Bn</code> 強制印出：</p>
+
+<pre><code>$ make -n
+aarch64-linux-gnu-gcc -Wall -Wextra -Werror \
+    -ffreestanding -nostdlib -static \
+    -Wl,-T,linker/kernel-qemu.ld -Wl,--build-id=none \
+    -o build/kernel.elf kernel/boot.S</code></pre>
+
+<p>這一條命令裡，gcc 依序做了前處理、組譯、連結三件事。想看中間產物的話下 <code>-c</code> 就會停在 <code>.o</code>。</p>
+
+<div class="tbl">
+<table>
+<tr><th>角色</th><th>檔案</th><th>進版控？</th></tr>
+<tr><td>要執行的程式</td><td><code>kernel/boot.S</code></td><td>是</td></tr>
+<tr><td>放在哪裡的規則</td><td><code>linker/kernel-qemu.ld</code></td><td>是</td></tr>
+<tr><td>建置產物</td><td><code>build/kernel.elf</code></td><td><strong>否</strong></td></tr>
+</table>
+</div>
+
+<p><code>build/</code> 底下的東西全部可以由原始碼重新產生，所以整個目錄被 <code>.gitignore</code> 排除。<code>make clean</code> 就是直接把它刪掉。</p>
+
+<h3>build/virt.dtb 是怎麼來的 —— 它不是「編譯」來的</h3>
+
+<p>這裡容易誤會。專案裡<strong>沒有任何 <code>.dts</code> 原始檔</strong>，<code>virt.dtb</code> 也不是我們寫的。它是 QEMU 在初始化機器時<strong>依當下的命令列參數即時合成</strong>的，<code>dumpdtb=</code> 只是叫它把合成結果寫出來然後直接結束：</p>
+
+<pre><code>$ make dtb
+qemu-system-aarch64 -M virt -cpu cortex-a72 \
+    -machine dumpdtb=build/virt.dtb -nographic
+    → qemu-system-aarch64: info: dtb dumped to build/virt.dtb. Exiting.
+
+dtc -I dtb -O dts build/virt.dtb        # 二進位 .dtb 轉成人看得懂的 .dts</code></pre>
+
+<p>「即時合成」不是說法上的講究，是可以驗證的。改命令列參數，產生出來的 device tree 就跟著變：</p>
+
+<div class="tbl">
+<table>
+<tr><th>命令列</th><th>device tree 裡的節點</th></tr>
+<tr><td><code>-m 128M</code>（預設）</td><td><code>reg = &lt;0x00 0x40000000 0x00 0x8000000&gt;</code></td></tr>
+<tr><td><code>-m 512M</code></td><td><code>reg = &lt;0x00 0x40000000 0x00 0x20000000&gt;</code></td></tr>
+<tr><td><code>-smp 1</code>（預設）</td><td>1 個 <code>cpu@</code> 節點</td></tr>
+<tr><td><code>-smp 4</code></td><td>4 個 <code>cpu@</code> 節點</td></tr>
+</table>
+</div>
+
+<p>所以要分清楚兩件事：<strong>RAM 的起始位址 <code>0x4000_0000</code> 是 <code>virt</code> 這個機器模型定死的</strong>（改命令列也不會變），而<strong>長度是 <code>-m</code> 決定的</strong>。我們的 Makefile 沒有下 <code>-m</code>，所以拿到 QEMU 的預設值 128 MiB。</p>
+
+<div class="callout">
+<span class="lbl">移植時這裡會變</span>
+<p>真實硬體上沒有 QEMU 幫你合成 device tree —— 那份 <code>.dtb</code> 由韌體或 bootloader 提供（樹莓派放在開機分割區裡），再依 boot protocol 把它的位址透過 <code>x0</code> 傳給核心。角色相同，來源不同。這也是為什麼 <code>boot.S</code> 裡那行 <code>mov x0, xzr</code> 在真機上會是個問題。</p>
+</div>
+
+<p>關鍵在最後一段：<code>-kernel</code> 讓 QEMU 扮演作業系統 loader 的角色。它讀 ELF 檔的 program header，把每個 <code>PT_LOAD</code> 區段搬到 header 記載的實體位址，然後從進入點開始執行。</p>
+
+<h2><span class="num">4</span>心智模型</h2>
+
+<h3>先說清楚：<code>-M virt</code> 是什麼</h3>
+
+<p>QEMU 模擬的不是某一塊真實存在的開發板，而是一塊<strong>為了虛擬化而設計的通用板子</strong>，名字就叫 <code>virt</code>。它沒有實體對應物，好處是佈局乾淨、週邊都是標準元件（PL011 UART、GICv2 中斷控制器），不必處理任何真實硬體的歷史包袱。</p>
+
+<p><code>-cpu cortex-a72</code> 則是選 CPU 核心，這裡刻意選跟移植目標 Raspberry Pi 4（BCM2711）同一顆，讓「在 QEMU 上寫的指令能不能在真機上跑」這件事少一個變因。</p>
+
+<h3>模型一：記憶體不是一整片，是一張地圖</h3>
+
+<p>寫應用程式時，記憶體像一片無差別的空地，作業系統給你哪塊你就用哪塊。裸機不是。<strong>位址本身就有意義</strong>——某些位址背後是 RAM，某些位址背後根本不是記憶體，而是硬體暫存器。</p>
+
+<figure>
+<svg viewBox="0 0 700 340" role="img" aria-label="QEMU virt 記憶體地圖">
+  <g font-family="ui-monospace,monospace" font-size="11.5" fill="currentColor">
+    <text x="196" y="18" text-anchor="end" font-size="10.5" opacity=".6">位址</text>
+    <text x="216" y="18" font-size="10.5" opacity=".6">內容</text>
+
+    <rect x="216" y="28" width="300" height="46" fill="var(--mmio)" opacity=".18"/>
+    <rect x="216" y="28" width="300" height="46" fill="none" stroke="var(--mmio)" stroke-width="1.2"/>
+    <text x="196" y="46" text-anchor="end">0x0000_0000</text>
+    <text x="232" y="47">flash</text>
+    <text x="232" y="63" font-size="10" opacity=".65">開機用的唯讀區</text>
+
+    <rect x="216" y="78" width="300" height="42" fill="var(--mmio)" opacity=".18"/>
+    <rect x="216" y="78" width="300" height="42" fill="none" stroke="var(--mmio)" stroke-width="1.2"/>
+    <text x="196" y="96" text-anchor="end">0x0800_0000</text>
+    <text x="232" y="97">intc — 中斷控制器 (GIC)</text>
+    <text x="232" y="112" font-size="10" opacity=".65">M4 會用到</text>
+
+    <rect x="216" y="124" width="300" height="42" fill="var(--mmio)" opacity=".18"/>
+    <rect x="216" y="124" width="300" height="42" fill="none" stroke="var(--mmio)" stroke-width="1.2"/>
+    <text x="196" y="142" text-anchor="end">0x0900_0000</text>
+    <text x="232" y="143">pl011 — UART</text>
+    <text x="232" y="158" font-size="10" opacity=".65">M1 的目標，終於能印字</text>
+
+    <rect x="216" y="170" width="300" height="36" fill="var(--mmio)" opacity=".18"/>
+    <rect x="216" y="170" width="300" height="36" fill="none" stroke="var(--mmio)" stroke-width="1.2"/>
+    <text x="196" y="192" text-anchor="end">0x0a00_0000</text>
+    <text x="232" y="192">virtio_mmio</text>
+
+    <line x1="216" y1="214" x2="516" y2="214" stroke="currentColor" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="524" y="212" font-size="10.5" font-weight="700" fill="var(--accent)">RAM 從這裡才開始</text>
+
+    <rect x="216" y="222" width="300" height="30" fill="var(--kern)" opacity=".35"/>
+    <rect x="216" y="222" width="300" height="30" fill="none" stroke="var(--kern)" stroke-width="1.8"/>
+    <text x="196" y="241" text-anchor="end" font-weight="700">0x4000_0000</text>
+    <text x="232" y="241" font-weight="700">我們的核心（12 bytes）</text>
+
+    <rect x="216" y="252" width="300" height="62" fill="var(--ram)" opacity=".16"/>
+    <rect x="216" y="252" width="300" height="62" fill="none" stroke="var(--ram)" stroke-width="1.2"/>
+    <text x="358" y="278" text-anchor="middle" opacity=".8">可用 RAM</text>
+    <text x="358" y="296" text-anchor="middle" font-size="10" opacity=".6">總長 0x800_0000 = 128 MiB</text>
+    <text x="196" y="318" text-anchor="end" opacity=".7">0x4800_0000</text>
+
+    <text x="540" y="60" font-size="10.5" opacity=".7">這一整段不是記憶體，</text>
+    <text x="540" y="76" font-size="10.5" opacity=".7">是硬體暫存器（MMIO）。</text>
+    <text x="540" y="92" font-size="10.5" opacity=".7">核心放進去等於</text>
+    <text x="540" y="108" font-size="10.5" opacity=".7">寫到 UART 上。</text>
+  </g>
+</svg>
+<figcaption>QEMU virt 的記憶體地圖。這張圖不是背下來的，是 <code>make dtb</code> 印出來的</figcaption>
+</figure>
+
+<p><code>0x4000_0000</code> 這個數字不是慣例，也不需要相信任何人。它寫在這塊板子自己的 device tree 裡：</p>
+
+<p>輸出是完整的 388 行 dts，memory 節點在三百多行處。要直接撈：<code>make dtb | grep -A3 'memory@'</code>。</p>
+
+<pre><code>$ make dtb | grep -A3 'memory@'
+memory@40000000 {
+    reg = &lt;0x00 0x40000000 0x00 0x8000000&gt;;
+    device_type = "memory";
+};</code></pre>
+
+<p>四個數字讀作「起始位址 <code>0x0_4000_0000</code>，長度 <code>0x0_800_0000</code>」（各拆成高低兩個 32-bit）。<strong>換一塊板子，第一件事就是找出這個節點。</strong></p>
+
+<h3>模型二：linker script 只有一個變數在動</h3>
+
+<p>linker script 看起來像一種陌生語言，但它的核心只有一個東西：<strong>位置計數器 <code>.</code></strong>。它就是「我現在發到哪個位址了」的游標。</p>
+
+<ul>
+  <li>對 <code>.</code> 賦值 = 把游標移到那裡</li>
+  <li>放進一個 section = 游標往前推該 section 的長度</li>
+</ul>
+
+<p>整份 ELF 裡每一個位址，都是這一個游標移動的結果。理解了這件事，linker script 就從「咒語」變成「一段從上往下執行的程式」。</p>
+
+<h3>模型三：section 和 segment 是兩層不同的東西</h3>
+
+<p>先講 ELF 是什麼。ELF 是 Linux 世界的執行檔格式，而它其實是<strong>一份檔案配兩張目錄</strong>——同一堆內容，用兩種方式編目，給兩種不同的讀者看：</p>
+
+<div class="tbl">
+<table>
+<tr><th>目錄</th><th>單位</th><th>給誰看</th><th>怎麼查</th></tr>
+<tr><td>section header table</td><td>section（<code>.text</code>、<code>.data</code>、<code>.symtab</code>…）</td><td><strong>連結器</strong>：切得細，方便挑選、合併、丟棄</td><td><code>readelf -S</code></td></tr>
+<tr><td>program header table</td><td>segment（<code>PT_LOAD</code>…）</td><td><strong>載入器</strong>：只關心「哪一段要搬進記憶體、搬到哪」</td><td><code>readelf -l</code></td></tr>
+</table>
+</div>
+
+<p>所以我們在 linker script 裡操作的是 section，而 QEMU 載入時讀的是 segment；ld 在產生檔案時自己決定怎麼把 section 打包成 segment。<code>PT_LOAD</code> 就是 segment 的一種型別，意思是「這段內容必須先在記憶體裡，程式才跑得起來」。</p>
+
+<p>ELF header 本身（<code>readelf -h</code>）則記著整份檔案的總目：架構、型別、兩張表在哪，以及 <code>e_entry</code>——執行要從哪個位址開始。</p>
+
+<p>這是最容易卡住的觀念。我們在 linker script 裡寫的是 <strong>section</strong>（<code>.text</code>、<code>.data</code>），但 QEMU 載入時看的是 <strong>segment</strong>（program header 裡的 <code>PT_LOAD</code>）。</p>
+
+<figure>
+<svg viewBox="0 0 700 250" role="img" aria-label="section 與 segment 的關係">
+  <g font-family="ui-monospace,monospace" font-size="11.5" fill="currentColor">
+    <defs>
+      <marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+        <path d="M0,0 L7,3.2 L0,6.4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      </marker>
+    </defs>
+    <text x="80" y="22" font-weight="700" font-size="12">我們寫的</text>
+    <text x="80" y="38" font-size="10" opacity=".6">section</text>
+    <text x="300" y="22" font-weight="700" font-size="12">ld 打包成</text>
+    <text x="300" y="38" font-size="10" opacity=".6">segment (program header)</text>
+    <text x="530" y="22" font-weight="700" font-size="12">QEMU 搬到</text>
+    <text x="530" y="38" font-size="10" opacity=".6">實體記憶體</text>
+
+    <rect x="80" y="56" width="130" height="34" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+    <text x="145" y="78" text-anchor="middle">.text</text>
+    <rect x="80" y="96" width="130" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="1" opacity=".35" stroke-dasharray="4 3"/>
+    <text x="145" y="116" text-anchor="middle" opacity=".45" font-size="10.5">.data（M1）</text>
+    <rect x="80" y="132" width="130" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="1" opacity=".35" stroke-dasharray="4 3"/>
+    <text x="145" y="152" text-anchor="middle" opacity=".45" font-size="10.5">.bss（M1）</text>
+    <rect x="80" y="168" width="130" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="1" opacity=".25"/>
+    <text x="145" y="188" text-anchor="middle" opacity=".4" font-size="10.5">.symtab</text>
+    <text x="145" y="212" text-anchor="middle" font-size="9.5" opacity=".5">除錯用，不進記憶體</text>
+
+    <line x1="216" y1="73" x2="292" y2="88" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)" opacity=".7"/>
+
+    <rect x="300" y="66" width="150" height="52" rx="5" fill="var(--kern)" opacity=".2"/>
+    <rect x="300" y="66" width="150" height="52" rx="5" fill="none" stroke="var(--kern)" stroke-width="1.6"/>
+    <text x="375" y="86" text-anchor="middle" font-weight="700">PT_LOAD</text>
+    <text x="375" y="102" text-anchor="middle" font-size="10">PhysAddr 0x40000000</text>
+    <text x="375" y="114" text-anchor="middle" font-size="10">FileSiz 0xc</text>
+    <text x="375" y="146" text-anchor="middle" font-size="10" opacity=".65">「這段必須先在記憶體裡，</text>
+    <text x="375" y="160" text-anchor="middle" font-size="10" opacity=".65">程式才跑得起來」</text>
+
+    <line x1="456" y1="92" x2="524" y2="92" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)" opacity=".7"/>
+
+    <rect x="532" y="66" width="130" height="52" rx="5" fill="var(--ram)" opacity=".2"/>
+    <rect x="532" y="66" width="130" height="52" rx="5" fill="none" stroke="var(--ram)" stroke-width="1.6"/>
+    <text x="597" y="88" text-anchor="middle">0x4000_0000</text>
+    <text x="597" y="106" text-anchor="middle" font-size="10">aa1f03e0 …</text>
+    <text x="597" y="146" text-anchor="middle" font-size="10" opacity=".65">PC 設到這裡，</text>
+    <text x="597" y="160" text-anchor="middle" font-size="10" opacity=".65">CPU 開始跑</text>
+  </g>
+</svg>
+<figcaption>ld 自己決定怎麼把 section 打包成 segment。<code>make dump</code> 最下面的 Section to Segment mapping 就是這張圖的實際輸出</figcaption>
+</figure>
+
+<h2><span class="num">5</span>逐段拆解</h2>
+
+<h3>boot.S — 為什麼不是 <code>b .</code></h3>
+
+<pre><code>.section .text.boot, "ax"       <span style="opacity:.6">建立一個叫 .text.boot 的 section</span>
+.global _start                  <span style="opacity:.6">讓這個符號在連結時看得見</span>
+
+_start:
+    mov     x0, xzr
+halt_loop:
+    add     x0, x0, #1
+    b       halt_loop</code></pre>
+
+<p>前兩行常被略過，但它們決定了整個佈局能不能成立：</p>
+
+<ul>
+<li><code>"ax"</code> 是這個 section 的旗標：<strong>a</strong>llocatable（執行時要佔記憶體，相對的是除錯資訊那種只存在檔案裡的）＋ e<strong>x</strong>ecutable。可寫的資料段會是 <code>"aw"</code>。</li>
+<li>section 的名字 <code>.text.boot</code> 就是 linker script 裡 <code>*(.text.boot)</code> 要抓的那個字串。<strong>兩邊是純字串比對，打錯不會有任何錯誤訊息</strong>——見第 7 節直覺 2。</li>
+<li><code>.global _start</code> 把符號從「本檔案私有」提升成「連結時可見」。少了它，<code>ENTRY(_start)</code> 找不到這個符號，ld 會退而使用 fallback 鏈（直覺 1）。</li>
+</ul>
+
+<p>裸機教學裡最常見的收尾是 <code>b .</code>（原地跳躍，無窮迴圈）。這裡刻意不用，理由是<strong>可觀測性</strong>：</p>
+
+<p>停住的核心和空轉的核心，從外面看完全一樣。如果映像根本沒被載進去、或者 <code>_start</code> 不在正確的位址上，<code>b .</code> 給不出任何線索。而一個一直遞增的 <code>x0</code>，只要在 GDB 裡停兩次、比對數值，就能證明 CPU 真的在執行我們寫的指令。</p>
+
+<p>這一行在 M1 就會拿掉——等 UART 能直接印字，就不需要拐彎抹角了。</p>
+
+<h3>xzr：為什麼沒有 x31</h3>
+
+<p>AArch64 有 31 個通用暫存器 <code>x0</code>–<code>x30</code>。編碼上的 31 號依指令形式解讀成 <strong>XZR</strong>（零暫存器）或 <strong>SP</strong>，沒有 x31 這個東西：</p>
+
+<div class="tbl">
+<table>
+<tr><th>指令</th><th>編碼</th><th>31 號的身分</th></tr>
+<tr><td><code>mov x0, xzr</code></td><td><code>aa1f03e0</code></td><td>XZR（實際是 <code>orr x0, xzr, xzr</code>）</td></tr>
+<tr><td><code>mov x1, sp</code></td><td><code>910003e1</code></td><td>SP（實際是 <code>add x1, sp, #0</code>）</td></tr>
+<tr><td><code>mov x2, #0</code></td><td><code>d2800002</code></td><td>沒用到 31 號，是另一條指令 MOVZ</td></tr>
+</table>
+</div>
+
+<h3>linker script — 怎麼讀這個檔</h3>
+
+<p>這是三個檔案裡語法最陌生的一個，它不像 C、也不像 shell。但真正要認的只有五種寫法。把註解拿掉之後，整份腳本其實只有這幾行：</p>
+
+<pre><code>ENTRY(_start)                       <span style="opacity:.6">──① 進入點</span>
+
+SECTIONS                            <span style="opacity:.6">──② 佈局規則的容器</span>
+{
+    . = 0x40000000;                 <span style="opacity:.6">──③ 移動位置計數器</span>
+
+    .text : {                       <span style="opacity:.6">──④ 建立一個輸出 section</span>
+        *(.text.boot)               <span style="opacity:.6">──⑤ 挑輸入 section 塞進去</span>
+        *(.text .text.*)
+    }
+}</code></pre>
+
+<div class="tbl">
+<table>
+<tr><th></th><th>寫法</th><th>意思</th></tr>
+<tr><td>①</td><td><code>ENTRY(符號)</code></td><td>把這個符號的位址填進 ELF header 的 <code>e_entry</code>。QEMU 讀的就是這個欄位。放在 <code>SECTIONS</code> <strong>外面</strong></td></tr>
+<tr><td>②</td><td><code>SECTIONS { … }</code></td><td>所有「東西放哪裡」的規則都寫在這對大括號裡。裡面由上往下依序執行</td></tr>
+<tr><td>③</td><td><code>. = 位址;</code></td><td><code>.</code> 是位置計數器。賦值 = 把游標移到那裡。分號不能省</td></tr>
+<tr><td>④</td><td><code>輸出名 : { 規則 }</code></td><td>在輸出檔裡<strong>建立</strong>一個叫「輸出名」的 section。冒號是這個語法的一部分，不是標籤</td></tr>
+<tr><td>⑤</td><td><code>檔案樣式(section 樣式)</code></td><td>從符合「檔案樣式」的輸入檔裡，把符合「section 樣式」的 section 抓進來。<code>*</code> = 所有輸入檔。<code>*</code> 也可以用在 section 名上，例如 <code>.text.*</code></td></tr>
+</table>
+</div>
+
+<p>認得這五種，整份腳本就從「咒語」變成「一段從上往下執行的程式」：把游標移到 <code>0x4000_0000</code>，建一個叫 <code>.text</code> 的輸出 section，先把所有輸入檔的 <code>.text.boot</code> 倒進去，再把 <code>.text</code> 和 <code>.text.*</code> 倒進去。游標隨著內容往前推。</p>
+
+<div class="callout">
+<span class="lbl">兩個沒寫出來、但你會想問的</span>
+<p><strong>沒被任何 <code>*()</code> 規則挑走的輸入 section 會怎樣？</strong>它叫 <strong>orphan section</strong>（孤兒），ld 會自己決定放哪裡，而且不會警告。直覺 2 就是在講這件事。</p>
+<p><strong>為什麼不用寫 <code>OUTPUT_FORMAT</code> / <code>OUTPUT_ARCH</code>？</strong>因為我們是透過 <code>aarch64-linux-gnu-gcc</code> 呼叫 ld，工具鏈本身已經決定了目標架構與位元組序，腳本不必再指定一次。直接用 <code>ld</code> 時才需要。</p>
+</div>
+
+<h3>M1 的預告：加上 .bss 之後會長什麼樣</h3>
+
+<p>現在的腳本只有 <code>.text</code>，因為 <code>boot.S</code> 沒有任何資料。等 M1 進了 C 語言，全域變數會產生 <code>.bss</code>，而<strong>沒有作業系統幫你把它清零</strong>——那是核心自己的工作。屆時這份腳本大約會多出這一段：</p>
+
+<pre><code>    . = ALIGN(8);                   <span style="opacity:.6">把游標推到 8 的倍數</span>
+    __bss_start = .;                <span style="opacity:.6">定義一個符號，值 = 游標當下位置</span>
+    .bss (NOLOAD) : {               <span style="opacity:.6">NOLOAD：只佔位址，不佔檔案空間</span>
+        *(.bss .bss.*)
+        *(COMMON)
+    }
+    __bss_end = .;</code></pre>
+
+<p>兩個新語法：<code>ALIGN(n)</code> 把位置計數器推到 <code>n</code> 的倍數；<strong><code>符號 = .;</code> 在腳本裡定義一個符號</strong>，組合語言和 C 都能取用它的位址。歸零迴圈就是靠 <code>__bss_start</code> 和 <code>__bss_end</code> 知道該清哪一段。同理，印字串需要的 <code>.rodata</code> 也是照這個樣子加一段。</p>
+
+<div class="callout">
+<span class="lbl">M1 真正的第一道關卡：堆疊</span>
+<p>比 <code>.bss</code> 歸零更早會咬人的是<strong>堆疊指標</strong>。第 6 節量到的機器狀態裡有一項是「SP 進入時為 0」——只要呼叫任何一個 C 函式，進去第一件事就是往 SP 指的地方推東西，也就是往 <code>0x0</code> 以下寫。那裡不是 RAM，是 flash 與 MMIO。</p>
+<p>症狀是「進 C 就死，而且死得莫名其妙」，因為錯誤發生在函式序言，跟你寫的邏輯無關。所以進 C 之前，<code>boot.S</code> 必須先做兩件事：<strong>把 SP 設到一塊真正的 RAM</strong>，然後清 <code>.bss</code>。linker script 屆時也要多提供一個堆疊頂端的符號。</p>
+</div>
+
+<p><code>(NOLOAD)</code> 是因為 <code>.bss</code> 全是零，沒必要把幾 KB 的零存進 ELF 檔；它只要在記憶體裡佔住位置就好。這也是為什麼 <code>make dump</code> 裡 <code>FileSiz</code> 和 <code>MemSiz</code> 是兩個獨立的欄位——有了 <code>.bss</code> 之後，MemSiz 會比 FileSiz 大。</p>
+
+<h3>Makefile — 每個旗標對應一個失敗</h3>
+
+<div class="tbl">
+<table>
+<tr><th>拿掉這個旗標</th><th>會發生什麼</th></tr>
+<tr><td><code>-nostdlib</code></td><td>crt1.o 被連進來，它自己也定義 <code>_start</code>：<code>multiple definition of '_start'</code>，同時因為 crt1.o 要呼叫 main 而冒出 <code>undefined reference to 'main'</code>。<strong>兩個症狀都是這個旗標的</strong>。實際會噴三十行左右，其餘多是 <code>__init_array</code> / <code>__ehdr_start</code> / <code>_end</code> 這類連帶失敗，往上找那兩條就好</td></tr>
+<tr><td><code>-Wl,-T</code></td><td>改用 ld 內建佈局，載入位址變成 <code>0x400078</code></td></tr>
+<tr><td><code>--build-id=none</code></td><td><code>.note.gnu.build-id</code> 佔住 <code>0x4000_0000</code>，<code>.text</code> 被擠到 <code>0x4000_0024</code></td></tr>
+<tr><td><code>-ffreestanding</code></td><td>對這個檔案<strong>沒有任何可觀察的差異</strong>。它是編譯期開關，作用要到 M1 進 C 才顯現</td></tr>
+<tr><td><code>-static</code></td><td>多出 <code>.interp</code>／<code>.dynamic</code>／<code>.got</code>，但<strong>在 QEMU 上照樣開得起來</strong>（見第 7 節）</td></tr>
+</table>
+</div>
+
+<div class="callout">
+<span class="lbl">最容易漏掉的一行</span>
+<p>把 linker script 列進 <code>build/kernel.elf</code> 的相依項。少了它，改完 linker script 執行 <code>make</code> 會顯示 <code>Nothing to be done</code>，沿用舊的 ELF——<strong>建置是「成功」的，位址卻是舊的</strong>。這種錯最難查，因為所有訊號都說沒問題。</p>
+</div>
+
+<h2><span class="num">6</span>實測數據</h2>
+
+<p>以下都量於 binutils 2.38 / gcc 11.4.0 / QEMU 6.2.0 / gdb 12.1（Ubuntu 22.04）。<strong>ld 的孤兒 section 擺放規則、gdb 的 prologue 判斷、預設頁大小三者都會隨版本改變</strong>，換工具鏈請重新量。</p>
+
+<h3>建置產物</h3>
+
+<pre><code>$ make dump
+0000000040000000 &lt;_start&gt;:
+    40000000:  aa1f03e0   mov  x0, xzr
+0000000040000004 &lt;halt_loop&gt;:
+    40000004:  91000400   add  x0, x0, #0x1
+    40000008:  17ffffff   b    40000004
+
+  Entry point address:  0x40000000
+  LOAD  Offset 0x10000  VirtAddr 0x40000000  PhysAddr 0x40000000
+        FileSiz 0xc     MemSiz 0xc           Align 0x10000</code></pre>
+
+<p><code>Offset 0x10000</code> 是 segment 在<strong>檔案裡</strong>的位移，不是記憶體位址。ELF 規定 segment 的檔案位移與虛擬位址必須對 <code>Align</code> 同餘，而 <code>VirtAddr</code> 是 <code>0x4000_0000</code>（<code>0x10000</code> 的倍數），所以 <code>Offset</code> 也只能是 <code>0x10000</code> 的倍數——這就是那一大段填充的由來。<code>0x10000</code>（64 KiB）是 ld 對 aarch64 的預設 max-page-size。</p>
+
+<p>66088 這個數字是這樣湊出來的：</p>
+
+<pre><code>0x10000  = 65536   前面的 ELF header、program header 與對齊填充
+    + 12 = 65548   .text 的三條指令
+   …            +  .symtab / .strtab / .shstrtab
+       = 65768   section header table 的起點（readelf -h 的 Start of section headers）
++ 5 × 64 =   320   五個 section header，每個 64 bytes
+       = 66088</code></pre>
+
+<p>加上 <code>-Wl,-z,max-page-size=4096</code> 檔案會縮成 4648 bytes。QEMU 不在意這件事，所以不加——多一個旗標就多一個要解釋的東西。</p>
+
+<div class="callout">
+<span class="lbl">VirtAddr 和 PhysAddr 為什麼是同一個值</span>
+<p>因為 MMU 還沒開。沒有分頁表，虛擬位址就等於實體位址，兩欄自然相同。等 M5 把 MMU 打開、核心搬到高位址（例如 <code>0xffff_0000_…</code>）之後，這兩欄就會分家：VirtAddr 是程式碼裡用的位址，PhysAddr 是它實際被放進 RAM 的位置。linker script 用 <code>AT()</code> 指定後者。</p>
+</div>
+
+<h3>證明 CPU 真的在執行</h3>
+
+<pre><code>$ make debug
+0x0000000040000000 in _start ()
+Breakpoint 1 at 0x40000008
+
+Breakpoint 1, 0x0000000040000008 in halt_loop ()
+$1 = 1
+
+Breakpoint 1, 0x0000000040000008 in halt_loop ()
+$2 = 2
+(gdb)</code></pre>
+
+<p><strong>x0 兩次不同 → CPU 真的在執行我們寫的指令，不是卡死、也不是根本沒載進去。</strong>這就是 M0 的驗收。</p>
+
+<p><code>make debug</code> 自動做完這兩次比對之後，會把你留在 <code>(gdb)</code> 提示字元前，接下來可以自己探索：</p>
+
+<pre><code>(gdb) c              繼續，再停一次（x0 會是 3）
+(gdb) p $x0          印暫存器
+(gdb) p/x $cpsr      0x400003c5
+(gdb) x/3i $pc       看目前位置的三條指令
+(gdb) q              離開（QEMU 會被一起收掉）</code></pre>
+
+<div class="callout">
+<span class="lbl">為什麼 debug 用 break halt_loop 而不是 break *halt_loop</span>
+<p>直覺 4 會說明 <code>break *halt_loop</code> 才停得到真正的第一條指令。這裡刻意<strong>不</strong>用星號，因為斷點落在哪其實不影響結論（要的是「兩次的值不同」），而讓讀者親眼看到 <code>0x4000_0008</code> 這個「意料之外」的位址，比事先繞過它更有教育意義。想要乾淨的行為，在 <code>(gdb)</code> 裡自己下 <code>break *halt_loop</code> 就好。</p>
+</div>
+
+<h3>開機當下的機器狀態</h3>
+
+<div class="tbl">
+<table>
+<tr><th>項目</th><th>量法</th><th>結果</th></tr>
+<tr><td>特權等級</td><td><code>p/x $cpsr</code> → <code>0x400003c5</code>，取 bits[3:0]</td><td><code>0b0101</code> = EL1h</td></tr>
+<tr><td>中斷遮罩</td><td>同上，取 bits[9:6]</td><td><code>0b1111</code> = DAIF 全遮</td></tr>
+<tr><td>暫存器</td><td><code>p $x0</code> … <code>p $sp</code></td><td>x0–x3、SP 全為 0</td></tr>
+<tr><td>核心數</td><td><code>info threads</code></td><td>只有 CPU#0</td></tr>
+<tr><td>RAM 內容</td><td>倒出整個 128 MiB 掃描</td><td>非零的只有核心自己那 12 bytes</td></tr>
+</table>
+</div>
+
+<p><code>0x400003c5</code> 這個值怎麼讀：低 4 位 <code>0b0101</code> 裡，<strong>bits[3:2] = <code>01</code> 是 EL 編號</strong>（所以是 EL1；EL2 會是 <code>10</code>、EL3 是 <code>11</code>），<strong>bit[0] 是 SPSel</strong>——1 表示用該 EL 自己的堆疊指標 SP_EL1，寫作 <code>EL1h</code>（h = handler）；0 表示沿用 SP_EL0，寫作 <code>EL1t</code>（t = thread）。再往上 bits[9:6] = <code>0b1111</code> 是 DAIF，四個中斷都被遮住（開頭那個 <code>0x4000_0000</code> 則是條件旗標 Z，跟開機狀態無關）——這也是開機狀態的一部分，M4 開中斷時要處理的就是它。</p>
+
+<p>注意 <code>p $CurrentEL</code> 在 gdb 12.1 回傳 <code>void</code>——它沒有把這個系統暫存器暴露給遠端目標，所以只能繞道 PSTATE。</p>
+
+<h2><span class="num">7</span>被推翻的直覺</h2>
+
+<p>這一節是這份教材裡最貴的部分。以下每一條都是「原本以為是這樣，實測之後發現不是」。</p>
+
+<div class="callout myth">
+<span class="lbl">直覺 1</span>
+<p><strong>「沒寫 ENTRY()，ld 會去找 <code>_start</code>」</strong></p>
+<p>錯。ld 的 fallback 鏈是：符號 <code>start</code>（<strong>沒有底線</strong>）→ <code>.text</code> 的第一個 byte → 位址 0。<code>_start</code> 根本不在鏈上。</p>
+<p>那為什麼平常省略 <code>ENTRY()</code> 還是能動？因為 ld <strong>內建的預設腳本</strong>裡寫了 <code>ENTRY(_start)</code>；而 <code>-T</code> 會把整份內建腳本換掉，那行 ENTRY 也就一起沒了。</p>
+<p>這條的教訓不只是結論，是<strong>怎麼設計實驗</strong>：如果把 <code>_start</code> 留在 <code>.text</code> 開頭去測，兩種假說都預測 <code>0x4000_0000</code>，實驗不可能失敗，也就什麼都證明不了。要在 <code>_start</code> 前面墊三個 <code>nop</code>，兩個答案才會分岔。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 2</span>
+<p><strong>「section 名稱拼錯，<code>_start</code> 就不在 <code>0x4000_0000</code> 了」</strong></p>
+<p>錯，而且錯得很安靜。拼成 <code>.text.b00t</code> 會被下一行 <code>*(.text .text.*)</code> 接住；拼成 <code>.txet.boot</code> 變成真正的<strong>孤兒 section</strong>（orphan section：沒有被 linker script 裡任何一條 <code>*()</code> 規則挑走的輸入 section，ld 只好自己找地方放），而 ld 把孤兒放在 <code>.</code> 的當下位置——剛好也是 <code>0x4000_0000</code>。<strong>兩種拼錯都能開機，而且 ld 一個警告都不會給。</strong></p>
+<p>那 <code>*(.text.boot)</code> 那行到底在做什麼？是<strong>排序</strong>。輸入檔多於一個時才看得出來：</p>
+<pre style="margin:10px 0 0"><code>有那行：  40000000 _start      4000000c other_func   e_entry 40000000
+沒那行：  40000000 other_func  40000004 _start       e_entry 40000004</code></pre>
+<p style="margin:8px 0 0;font-size:.9rem">（這裡的 <code>other_func</code> 只有一條 <code>ret</code>。指令數不同，位址自然跟著移，但誰排前面的結論不變。）</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 3</span>
+<p><strong>「<code>.note.gnu.build-id</code> 佔住載入位址，核心就開不起來」</strong></p>
+<p>在 QEMU 上照樣開得起來，因為 <code>e_entry</code> 跟著 <code>.text</code> 一起移到 <code>0x4000_0024</code>，QEMU 照著跳就對了。</p>
+<p>真正會死的是攤平成 raw binary 之後（Raspberry Pi 的 <code>kernel8.img</code> 就是這種格式，從第 0 個 byte 直接開始執行）：</p>
+<pre style="margin:10px 0 0"><code>00000000: 0400 0000 1400 0000 0300 0000 474e 5500   ....GNU.
+   0:  00000004   udf  #4      ← 未定義指令，當場死</code></pre>
+<p>所以 <code>--build-id=none</code> 是為了移植到樹莓派而下的，不是為了現在。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 4</span>
+<p><strong>「GDB 的斷點會停在 <code>halt_loop</code> 的第一行」</strong></p>
+<p>不會。在沒有除錯資訊時 GDB 靠掃描指令猜 prologue，會把開頭<strong>連續的一整串</strong> <code>add</code> 都跳過。這裡只有一條，所以停在 <code>b</code>（<code>0x4000_0008</code>），第一次看到的 x0 已經是 1。改成三條 <code>add</code>，它會一路跳到第四條指令。</p>
+<p>加上 <code>-g</code> 重新建置，GDB 改查行號表，斷點就回到 <code>0x4000_0004</code>、第一次停 x0 = 0。想繞過整件事，用 <code>break *halt_loop</code>（星號 = 照我給的位址下，別自己動）。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 5</span>
+<p><strong>「<code>mov x0, xzr</code> 是無害的」</strong></p>
+<p>今天無害——實測 QEMU 交過來時 x0 本來就是 0。但 AArch64 的 boot protocol 規定 <strong>bootloader 用 x0 傳 device tree 的位址</strong>，樹莓派的 firmware 就是這樣做的。這一行在真機上會把 DTB 指標洗掉，而且救不回來。M1 會移除它。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 6</span>
+<p><strong>「<code>.bss</code> 沒清零，馬上就會看到 bug」</strong></p>
+<p>在 QEMU 上永遠看不到。實測把整個 128 MiB RAM 倒出來掃描，非零的只有核心自己那 12 bytes——QEMU 交過來的記憶體本來就是乾淨的。</p>
+<p>這是一個<strong>在這個平台上做不出來的實驗</strong>。M1 還是要寫歸零迴圈，理由只能是推理，不能是實測。知道哪些事情「這裡驗不了」，跟知道哪些事情驗得了一樣重要。</p>
+</div>
+
+<h2><span class="num">8</span>精隨</h2>
+
+<p>如果 M0 只能留下三句話：</p>
+
+<ol>
+  <li><strong>位址是硬體的性質，不是慣例。</strong> <code>0x4000_0000</code> 不是背來的，是從 device tree 查來的。換板子時要重查的東西，就是這種東西。</li>
+  <li><strong>先建立回饋迴路，再寫功能。</strong> 三條指令的價值不在指令本身，在於它讓「改一行 → 看到差異」這條路打通了。<code>b .</code> 之所以被換掉，就是因為它不提供回饋。</li>
+  <li><strong>「建置成功」不等於「做對了」。</strong> M0 遇到的三個坑——linker script 沒列進相依、section 名稱拼錯、build-id 佔住載入位址——全部都是<strong>建置完全成功</strong>的情況下發生的。裸機開發沒有 segfault 幫你擋，唯一的防線是自己動手量。</li>
+</ol>
+
+<h2><span class="num">9</span>面試 60 秒</h2>
+
+<p class="q">Q：一個裸機核心從編譯到執行，中間發生了什麼？</p>
+<p>原始碼經過組譯得到 <code>.o</code>，連結時用自訂的 linker script 取代 ld 的預設佈局，指定程式碼放在 <code>0x4000_0000</code>——這個位址來自目標板的 device tree，是 RAM 的起點，再低就是 MMIO 了。linker script 的 <code>ENTRY()</code> 會填 ELF header 的 <code>e_entry</code>。QEMU 以 <code>-kernel</code> 扮演 ELF loader，把 <code>PT_LOAD</code> 區段搬到 program header 記載的實體位址，再把 PC 設到進入點。整個過程沒有作業系統參與，所以要自己下 <code>-nostdlib</code> 擋掉 C 啟動檔，否則它會帶進自己的 <code>_start</code> 造成重複定義。</p>
+
+<p class="q">Q：怎麼確認核心真的在跑？</p>
+<p>用 QEMU 的 <code>-S -s</code> 停在第一條指令並開 GDB 遠端埠。核心停在一個遞增暫存器的迴圈，不是 <code>b .</code>——因為停住的核心和空轉的核心從外面看一樣，遞增值才能區分。連續中斷兩次，值不同就證明在執行。（<code>readelf</code> 只能確認 ELF 建對了，證明不了 CPU 有沒有跑，這是兩回事。）</p>
+
+<div class="cheat">
+<h2 style="border:none;padding-top:0;margin-top:20px"><span class="num">10</span>一頁式小抄</h2>
+
+<h3>常用指令</h3>
+<pre><code>make            建置（零警告）
+make dump       反組譯 + ELF header + program header
+make qemu       跑起來（畫面全黑是正確的；離開 Ctrl-A 放開 X）
+make debug      QEMU 停在第一條指令 + 接上 GDB
+make dtb        印出 device tree，查平台位址</code></pre>
+
+<h3>關鍵數值</h3>
+<div class="tbl">
+<table>
+<tr><td>RAM 起點</td><td><code>0x4000_0000</code>，長 <code>0x800_0000</code>（128 MiB）</td></tr>
+<tr><td>UART (PL011)</td><td><code>0x0900_0000</code></td></tr>
+<tr><td>GIC</td><td><code>0x0800_0000</code></td></tr>
+<tr><td>開機特權等級</td><td>EL1h（<code>$cpsr</code> bits[3:0] = <code>0b0101</code>）</td></tr>
+</table>
+</div>
+
+<h3>GDB 速查</h3>
+<pre><code>break *halt_loop     照給的位址下斷點，不做 prologue 跳過
+p $x0                看暫存器
+p/x $cpsr            0x400003c5 → bits[3:0]=0101 → EL1h
+info threads         確認幾顆核心
+x/4xw 0x40000000     看載入位址的內容</code></pre>
+
+<h3>卡住時先查這三件事</h3>
+<ol style="margin-bottom:6px">
+  <li><code>make dump</code> 的 entry point 是不是 <code>0x4000_0000</code>？不是的話，看看是不是有東西擠在前面。</li>
+  <li>改了 linker script 但沒生效？確認它有列在 Makefile 的相依項裡。</li>
+  <li>GDB 顯示的指令跟原始碼對不上？很可能是上一隻 QEMU 沒關乾淨，你連到舊的那一隻了：<code>pkill -f qemu-system-aarch64</code>。</li>
+</ol>
+</div>
+
+<footer>
+armos · 里程碑 M0 · 開發平台 QEMU virt，移植目標 Raspberry Pi 4（BCM2711）<br>
+程式碼：<code>kernel/boot.S</code>、<code>linker/kernel-qemu.ld</code>、<code>Makefile</code>
+</footer>
+</div>
