@@ -134,7 +134,7 @@ aarch64-linux-gnu-gcc -Wall -Wextra -Werror -ffreestanding -nostdlib -static \
 
 <pre><code>$ make qemu</code></pre>
 
-<p><strong>應該看到：一片空白。</strong>這是正確的——UART 驅動要到 M1 才有，現在的核心沒有任何輸出能力。</p>
+<p><strong>應該看到：一片空白。</strong>這是正確的——UART 驅動要到 M2 才有，現在的核心沒有任何輸出能力。</p>
 
 <p><strong>離開方式：先按 <code>Ctrl-A</code>，放開，再按 <code>X</code>。</strong>（不是同時按三個鍵。<code>Ctrl-A</code> 是 QEMU 的跳脫鍵，按完之後它會等你下一個指令。）</p>
 
@@ -360,7 +360,7 @@ dtc -I dtb -O dts build/virt.dtb        # 二進位 .dtb 轉成人看得懂的 .
     <rect x="216" y="124" width="300" height="42" fill="none" stroke="var(--mmio)" stroke-width="1.2"/>
     <text x="196" y="142" text-anchor="end">0x0900_0000</text>
     <text x="232" y="143">pl011 — UART</text>
-    <text x="232" y="158" font-size="10" opacity=".65">M1 的目標，終於能印字</text>
+    <text x="232" y="158" font-size="10" opacity=".65">M2 的目標，終於能印字</text>
 
     <rect x="216" y="170" width="300" height="36" fill="var(--mmio)" opacity=".18"/>
     <rect x="216" y="170" width="300" height="36" fill="none" stroke="var(--mmio)" stroke-width="1.2"/>
@@ -504,7 +504,7 @@ halt_loop:
 
 <p>停住的核心和空轉的核心，從外面看完全一樣。如果映像根本沒被載進去、或者 <code>_start</code> 不在正確的位址上，<code>b .</code> 給不出任何線索。而一個一直遞增的 <code>x0</code>，只要在 GDB 裡停兩次、比對數值，就能證明 CPU 真的在執行我們寫的指令。</p>
 
-<p>這一行在 M1 就會拿掉——等 UART 能直接印字，就不需要拐彎抹角了。</p>
+<p>這一行在 M1 就會拿掉，換成真正的開機流程；等 M2 的 UART 能直接印字，就再也不需要這種拐彎抹角的手法了。</p>
 
 <h3>xzr：為什麼沒有 x31</h3>
 

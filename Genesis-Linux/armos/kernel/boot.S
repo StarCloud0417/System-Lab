@@ -20,7 +20,7 @@ halt_loop:
     /*
      * Not 'b .': a halted core and a spinning core look identical from the
      * outside, so 'b .' cannot show that the image actually ran. An
-     * incrementing x0 can. Removed in M1, once the UART can say it in words.
+     * incrementing x0 can. Removed in M1, when real boot code takes over.
      */
     add     x0, x0, #1
     b       halt_loop

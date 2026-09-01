@@ -38,7 +38,7 @@ dump: build/kernel.elf
 	@$(READELF) -h $< | grep 'Entry point'
 	@$(READELF) -l $<
 
-# 畫面全黑是正確的，UART 要到 M1。離開：先按 Ctrl-A，放開，再按 X
+# 畫面全黑是正確的，UART 驅動要到 M2。離開：先按 Ctrl-A，放開，再按 X
 qemu: build/kernel.elf
 	$(QEMU) -M virt -cpu cortex-a72 -nographic -kernel $<
 
