@@ -53,7 +53,8 @@ qemu: build/kernel.elf
 # 序列埠寫檔而不用 -nographic，否則會跟前景的 GDB 搶同一個終端機。
 debug: build/kernel.elf
 	@if ss -ltn 2>/dev/null | grep -q ':1234 '; then \
-	    echo "port 1234 已被佔用，先清掉舊的：pkill -f qemu-system-aarch64"; \
+	    echo "port 1234 已被佔用。清場：pkill -x qemu-system-aar"; \
+	    echo "（行程名被截成 15 字元；用全名比對不到，加 -f 又會殺到自己的 shell）"; \
 	    exit 1; \
 	fi
 	$(QEMU) -M virt -cpu cortex-a72 -display none -serial file:build/serial.log \
