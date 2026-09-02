@@ -1,0 +1,711 @@
+<title>M1：開機流程</title>
+<style>
+:root{
+  --bg:#fbfaf8; --fg:#1c1b19; --muted:#6b6862; --rule:#e0ddd6;
+  --card:#ffffff; --code-bg:#f4f2ee; --accent:#8a4b2a; --accent-soft:#f0e6df;
+  --ram:#7a9a6b; --mmio:#b08442; --kern:#8a4b2a;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#17181a; --fg:#e6e4e0; --muted:#9a968e; --rule:#2e3033;
+    --card:#1e2023; --code-bg:#232629; --accent:#d99b6c; --accent-soft:#2b2320;
+    --ram:#8fb07e; --mmio:#c9a05c; --kern:#d99b6c;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0; padding:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,"Segoe UI","Noto Sans TC","PingFang TC",sans-serif;
+  line-height:1.85; font-size:16.5px;
+}
+.wrap{max-width:820px;margin:0 auto;padding:56px 24px 96px}
+header{border-bottom:2px solid var(--fg);padding-bottom:22px;margin-bottom:8px}
+.kicker{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+h1{font-size:2.1rem;line-height:1.25;margin:0 0 12px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0;font-size:1rem}
+h2{font-size:1.28rem;margin:56px 0 4px;padding-top:24px;border-top:1px solid var(--rule);letter-spacing:-.005em}
+h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:.5em;font-weight:600}
+h3{font-size:1rem;margin:32px 0 8px;color:var(--accent)}
+p{margin:14px 0}
+ul,ol{margin:14px 0;padding-left:1.4em}
+li{margin:7px 0}
+code{font-family:"SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+  font-size:.87em;background:var(--code-bg);padding:.12em .4em;border-radius:4px}
+pre{background:var(--code-bg);border:1px solid var(--rule);border-radius:8px;
+  padding:16px 18px;overflow-x:auto;margin:18px 0;line-height:1.6}
+pre code{background:none;padding:0;font-size:.83rem}
+.tbl{overflow-x:auto;margin:18px 0}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+td code{white-space:nowrap}
+figure{margin:28px 0}
+figcaption{font-size:.82rem;color:var(--muted);margin-top:10px;text-align:center}
+svg{display:block;max-width:100%;height:auto;margin:0 auto}
+.callout{background:var(--card);border:1px solid var(--rule);border-left:3px solid var(--accent);
+  border-radius:0 8px 8px 0;padding:16px 20px;margin:22px 0}
+.callout .lbl{font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);
+  font-weight:700;display:block;margin-bottom:6px}
+.callout p{margin:8px 0}
+.callout p:first-of-type{margin-top:0}
+.callout p:last-child{margin-bottom:0}
+.myth{border-left-color:var(--mmio)}
+.myth .lbl{color:var(--mmio)}
+.cheat{background:var(--accent-soft);border:1px solid var(--rule);border-radius:10px;padding:6px 24px 20px;margin:24px 0}
+.cheat h3{margin-top:20px}
+footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
+  font-size:.83rem;color:var(--muted)}
+.q{font-weight:600;margin-top:22px}
+</style><div class="wrap">
+<header>
+  <p class="kicker">armos · 里程碑 M1</p>
+  <h1>開機流程：從韌體手上接過機器</h1>
+  <p class="sub">M0 讓 CPU 跑起來了。M1 要把它整理成一個乾淨的已知狀態，才能交給 C 語言</p>
+</header>
+
+<h2><span class="num">1</span>要解決什麼問題</h2>
+
+<p>M0 結束時，核心停在一個遞增暫存器的迴圈裡。它會動，但機器的狀態是<strong>韌體給什麼就是什麼</strong>——我們從來沒問過現在是什麼狀況。</p>
+
+<p>問題是不同平台給的東西不一樣：</p>
+
+<div class="tbl">
+<table>
+<tr><th>平台</th><th>交給我們時的狀態</th></tr>
+<tr><td>QEMU <code>-M virt</code></td><td>EL1、單核、SP = 0、BSS 未清</td></tr>
+<tr><td>QEMU <code>-M virt,virtualization=on</code></td><td><strong>EL2</strong>、單核、SP = 0、BSS 未清</td></tr>
+<tr><td>Raspberry Pi 4</td><td><strong>EL2</strong>、<strong>四顆核心全開</strong>、SP 未定義、BSS 未清<br><span style="opacity:.6;font-size:.9em">（依規格文件，本專案尚無實機可驗；上面兩列是本機實測）</span></td></tr>
+</table>
+</div>
+
+<p>C 語言完全不知道這些事。它假設：有一個能用的堆疊、未初始化的全域變數是 0、而且只有一個執行流程。這三件事<strong>沒有人會幫你準備</strong>。</p>
+
+<p>所以 M1 的工作是：把上面那張表的差異抹平，變成一個固定的起點，然後才跳進 C。</p>
+
+<h2><span class="num">2</span>動手：跑起來看</h2>
+
+<p>這個里程碑的重點是「同一份程式在兩種起點下都要落在 EL1」，所以要跑兩次。五步，大約十分鐘。</p>
+
+<div class="callout">
+<span class="lbl">這一節不需要看懂名詞</span>
+<p>底下會出現 <code>CurrentEL</code>、<code>HCR_EL2</code>、<code>eret</code>、<code>mrs</code> 這些東西，<strong>現在都不用懂</strong>。這一節的目的是先讓你<strong>看到現象</strong>——尤其是步驟 5 那兩種當機的樣子。看過之後再讀第 3 節之後的解釋，會比一開始就啃名詞好記得多。</p>
+<p>每個名詞第一次出現時都標了在第幾節解釋，想先查也可以。</p>
+</div>
+
+<h3>步驟 1：建置</h3>
+
+<pre><code>$ make
+aarch64-linux-gnu-gcc -Wall -Wextra -Werror -ffreestanding -nostdlib -static \
+    -Wl,-T,linker/kernel-qemu.ld -Wl,--build-id=none -o build/kernel.elf kernel/boot.S</code></pre>
+
+<h3>步驟 2：看反組譯，確認控制流</h3>
+
+<pre><code>$ make dump
+
+0000000040000000 &lt;_start&gt;:
+    40000000:  d5384249   mrs  x9, currentel
+    40000004:  f100113f   cmp  x9, #0x4
+    40000008:  54000100   b.eq 40000028 &lt;el1_entry&gt;   <span style="opacity:.6">// b.none</span>
+    4000000c:  d2b00009   mov  x9, #0x80000000
+    40000010:  d51c1109   msr  hcr_el2, x9
+    40000014:  d28078a9   mov  x9, #0x3c5
+    40000018:  d51c4009   msr  spsr_el2, x9
+    4000001c:  10000069   adr  x9, 40000028 &lt;el1_entry&gt;
+    40000020:  d51c4029   msr  elr_el2, x9
+    40000024:  d69f03e0   eret
+
+0000000040000028 &lt;el1_entry&gt;:
+    40000028:  aa1f03ea   mov  x10, xzr</code></pre>
+
+<p>（<code>mrs</code> 是「把系統暫存器搬到通用暫存器」，<code>eret</code> 是往下降一層的唯一辦法，<code>adr</code> 是取位址——分別在第 3、5、6 節解釋。）</p>
+
+<p>objdump 在 <code>b.eq</code> 後面印的 <code>// b.none</code> <strong>不是錯誤</strong>——那兩個是同一個機器碼的兩種助憶符（同一個條件碼在不同語境有不同名字）。</p>
+
+<h3>步驟 3：一般開機（進來就是 EL1）</h3>
+
+<pre><code>$ make debug
+
+Breakpoint 1, 0x0000000040000030 in halt_loop ()
+$1 = 1
+
+Breakpoint 1, 0x0000000040000030 in halt_loop ()
+$2 = 2
+(gdb)</code></pre>
+
+<p>停在 <code>(gdb)</code> 之後，確認自己在 EL1：</p>
+
+<pre><code>(gdb) p/x $cpsr
+$3 = 0x600003c5
+(gdb) p ($cpsr &gt;&gt; 2) &amp; 3
+$4 = 1                <span style="opacity:.6">← EL1</span></code></pre>
+
+<div class="callout">
+<span class="lbl">怎麼讀 CurrentEL（這顆暫存器是什麼，第 3 節會講）</span>
+<p><code>p $CurrentEL</code> 在 gdb 12.1 會回 <code>void</code>——它沒有把這顆系統暫存器暴露給遠端目標。兩種替代做法：</p>
+<p><strong>方法一：從 PSTATE 反推。</strong><code>p ($cpsr &gt;&gt; 2) &amp; 3</code>，取 bits[3:2]。這是最方便的。</p>
+<p><strong>方法二：讓程式自己讀給你看。</strong> 我們的 <code>_start</code> 第一行就是 <code>mrs x9, CurrentEL</code>，執行完 <code>x9</code> 裡就是答案。</p>
+<p><strong>但不能直接在 <code>make debug</code> 的提示字元下 <code>stepi</code>。</strong> 那個目標為了自動比對兩次 x10，已經 <code>continue</code> 過兩次，等你拿到 <code>(gdb)</code> 時程式早就跑到 <code>halt_loop</code> 了，這時 <code>stepi</code> 只是在迴圈裡踏步，<code>x9</code> 讀出來會是 <code>0x40000028</code>（<code>adr</code> 留下的殘值），不是 EL 編號。</p>
+<p>要看進入點，得自己起一份不會自動 continue 的：</p>
+<pre style="margin:10px 0 0"><code>$ qemu-system-aarch64 -M virt -cpu cortex-a72 -display none \
+      -serial null -kernel build/kernel.elf -S -gdb tcp::12345 &amp;
+$ gdb-multiarch -q build/kernel.elf -ex 'target remote :12345'
+
+(gdb) stepi          <span style="opacity:.6">執行第一條指令 mrs x9, CurrentEL</span>
+(gdb) p/x $x9
+$1 = 0x4             <span style="opacity:.6">← 一般開機；換成 virt,virtualization=on 會是 0x8</span></code></pre>
+<p>這也是為什麼<strong>方法一比較實用</strong>：<code>p ($cpsr &gt;&gt; 2) &amp; 3</code> 任何時候都問得到，不必care程式跑到哪了。</p>
+<p>同一個限制對 <code>HCR_EL2</code>、<code>SPSR_EL2</code>、<code>VBAR_EL1</code> 全都適用——gdb 12.1 一律回 <code>void</code>。想看那些暫存器，就寫一小段只做 <code>mrs</code> 的暫時程式，讓它把值搬進通用暫存器。第 7 節那兩個 <code>_EL2</code> 的值就是這樣量出來的。</p>
+</div>
+
+<h3>步驟 4：用 EL2 開機（模擬樹莓派）</h3>
+
+<p>Makefile 有對應的目標：</p>
+
+<pre><code>$ make qemu-el2      <span style="opacity:.6">直接跑</span>
+$ make debug-el2     <span style="opacity:.6">停在第一條指令並接上 GDB</span></code></pre>
+
+<p>它們就是把 <code>-M virt</code> 換成 <code>-M virt,virtualization=on</code>，其餘完全一樣。展開的完整指令是：</p>
+
+<pre><code>qemu-system-aarch64 -M virt,virtualization=on -cpu cortex-a72 \
+    -display none -serial file:build/serial.log \
+    -kernel build/kernel.elf -S -s</code></pre>
+
+<p><code>make debug-el2</code> 應該印出跟步驟 3 <strong>一模一樣</strong>的 <code>$1 = 1</code> / <code>$2 = 2</code>。停在 <code>(gdb)</code> 之後確認自己在 EL1：</p>
+
+<pre><code>(gdb) p ($cpsr &gt;&gt; 2) &amp; 3
+$3 = 1                     <span style="opacity:.6">← 進來時是 EL2，現在已經降到 EL1</span>
+(gdb) p/x $cpsr
+$4 = 0x3c5                 <span style="opacity:.6">← 正是我們寫進 SPSR_EL2 的值</span></code></pre>
+
+<p><strong>兩個目標印出相同的 x10，但走的路完全不同</strong>——這就是降級有效的證明。</p>
+
+<p>順帶一提，兩條路徑的 <code>$cpsr</code> 高位不一樣：一般開機是 <code>0x600003c5</code>，EL2 路徑是 <code>0x3c5</code>。差的 <code>0x6000_0000</code> 是條件旗標 NZCV，一般開機那條被 <code>cmp</code> 設過，而 EL2 那條在 <code>eret</code> 時被 <code>SPSR_EL2</code> 的值整個覆蓋掉了。低 12 位才是我們關心的狀態。</p>
+
+<h3>步驟 5：把它弄壞（最重要的一步）</h3>
+
+<p>前四步都在確認「一切正常」。真正學到東西是靠看壞掉的樣子。
+
+<div class="callout">
+<span class="lbl">先確認怎麼復原</span>
+<p>如果 M1 的改動<strong>還沒 commit</strong>，<code>git checkout .</code> 會把 <code>boot.S</code> 打回上一個 commit 的版本，整段降級程式碼就消失了。先用 <code>git stash</code> 存起來（<code>git stash pop</code> 拿回來），或先 commit 再做實驗。</p>
+</div>
+
+<p>三個實驗：</p></p>
+
+<div class="tbl">
+<table>
+<tr><th>#</th><th>做什麼</th><th>然後</th><th>你會看到</th></tr>
+<tr><td>1</td><td>把 <code>boot.S</code> 從 <code>mov x9, #(1 &lt;&lt; 31)</code> 到 <code>eret</code> 整段刪掉</td><td><code>make clean &amp;&amp; make debug-el2</code></td><td>核心照樣跑（<code>$1=1, $2=2</code>），但 <code>p ($cpsr &gt;&gt; 2) &amp; 3</code> 是 <strong>2</strong> —— 卡在 EL2</td></tr>
+<tr><td>2</td><td>只刪掉開頭三行（<code>mrs</code> / <code>cmp</code> / <code>b.eq</code>），保留降級</td><td><code>make clean &amp;&amp; make debug</code></td><td><strong>當機</strong>，而且沒有任何錯誤訊息。詳見下面</td></tr>
+<tr><td>3</td><td>只刪掉 <code>mov x9, #(1 &lt;&lt; 31)</code> 和 <code>msr hcr_el2, x9</code> 兩行</td><td><code>make clean &amp;&amp; make debug-el2</code></td><td>症狀跟實驗 2 幾乎一樣（<code>pc = 0x200</code>、<code>x10 = 0</code>），但 <code>EL</code> 是 <strong>2</strong> 不是 1 —— 成因完全不同</td></tr>
+</table>
+</div>
+
+<p>（實驗 1 對應第 4 節「為什麼要降」，實驗 2、3 對應第 5 節。看不懂沒關係，先看現象。）</p>
+
+<p>實驗 2 值得看清楚。少了「先問樓層」，在 QEMU 一般開機（已經是 EL1）就會直接去寫 <code>HCR_EL2</code>，而那顆暫存器在 EL1 讀不到：</p>
+
+<pre><code>(gdb) p/x $pc
+$1 = 0x200                 <span style="opacity:.6">← 不是我們的程式碼</span>
+(gdb) p $x10
+$2 = 0                     <span style="opacity:.6">← 計數器一次都沒跑到</span>
+(gdb) x/2i $pc
+=&gt; 0x200:  adr  x16, 0x60845
+   0x204:  udf  #12336     <span style="opacity:.6">← 這是記憶體垃圾，不是指令</span></code></pre>
+
+<p><strong><code>0x200</code> 這個位址不是隨機的。</strong> 例外向量表的基底位址存在 <code>VBAR_EL1</code>，它重置後是 0；而「同一層、同步例外」的入口剛好在基底 + <code>0x200</code>。所以 CPU 是規規矩矩地跳去處理例外了——只是那個位址上什麼都沒有，因為例外向量表要到 M3 才會建。</p>
+
+<p>這就是本專案反覆強調的那種失敗：<strong>沒有錯誤訊息，只有一個跑到不知道哪裡去的 PC。</strong></p>
+
+<p><strong>實驗 3 值得跟實驗 2 對照著看。</strong> 兩者的 <code>pc</code> 都停在 <code>0x200</code>、<code>x10</code> 都是 0，看起來像同一個問題，但：</p>
+
+<div class="tbl">
+<table>
+<tr><th></th><th>實驗 2（沒判斷 EL）</th><th>實驗 3（沒設 RW）</th></tr>
+<tr><td>發生在哪</td><td><code>msr hcr_el2</code> 當下</td><td><code>eret</code> 之後的下一次取指令</td></tr>
+<tr><td>當時的 EL</td><td>1</td><td><strong>2</strong>（換層失敗了）</td></tr>
+<tr><td>原因</td><td>在 EL1 碰 EL2 的暫存器</td><td><code>HCR_EL2.RW</code> 和 <code>SPSR_EL2.M[4]</code> 打架</td></tr>
+</table>
+</div>
+
+<p><strong>看 EL 就能分辨</strong>——這是裸機除錯的典型手法：症狀相同時，去找那個會分岔的欄位。</p>
+
+<h2><span class="num">3</span>先認識「特權等級」</h2>
+
+<p>ARM64 把權力分成四層，叫 <strong>Exception Level</strong>（例外等級），簡稱 EL。數字越大權力越大。</p>
+
+<figure>
+<svg viewBox="0 0 700 300" role="img" aria-label="四個特權等級">
+  <g font-family="ui-monospace,monospace" font-size="12.5" fill="currentColor">
+    <rect x="120" y="24" width="330" height="46" rx="6" fill="var(--mmio)" opacity=".16"/>
+    <rect x="120" y="24" width="330" height="46" rx="6" fill="none" stroke="var(--mmio)" stroke-width="1.3"/>
+    <text x="140" y="44" font-weight="700">EL3</text>
+    <text x="200" y="44">韌體（Secure Monitor）</text>
+    <text x="200" y="61" font-size="10.5" opacity=".65">開機最早期，我們碰不到</text>
+
+    <rect x="120" y="80" width="330" height="46" rx="6" fill="var(--mmio)" opacity=".16"/>
+    <rect x="120" y="80" width="330" height="46" rx="6" fill="none" stroke="var(--mmio)" stroke-width="1.3"/>
+    <text x="140" y="100" font-weight="700">EL2</text>
+    <text x="200" y="100">虛擬機管理器（Hypervisor）</text>
+    <text x="200" y="117" font-size="10.5" opacity=".65">樹莓派把我們丟在這裡</text>
+
+    <rect x="120" y="136" width="330" height="52" rx="6" fill="var(--kern)" opacity=".32"/>
+    <rect x="120" y="136" width="330" height="52" rx="6" fill="none" stroke="var(--kern)" stroke-width="2"/>
+    <text x="140" y="158" font-weight="700">EL1</text>
+    <text x="200" y="158" font-weight="700">作業系統核心 ← 我們要待的地方</text>
+    <text x="200" y="176" font-size="10.5" opacity=".75">Linux 核心也在這一層</text>
+
+    <rect x="120" y="198" width="330" height="46" rx="6" fill="var(--ram)" opacity=".16"/>
+    <rect x="120" y="198" width="330" height="46" rx="6" fill="none" stroke="var(--ram)" stroke-width="1.3"/>
+    <text x="140" y="218" font-weight="700">EL0</text>
+    <text x="200" y="218">一般程式</text>
+    <text x="200" y="235" font-size="10.5" opacity=".65">M8 之後才會用到</text>
+
+    <g stroke="currentColor" stroke-width="1.3" fill="none" opacity=".6">
+      <path d="M 470 210 L 500 210 L 500 110 L 470 110" />
+      <path d="M 476 104 L 470 110 L 476 116" />
+      <path d="M 90 110 L 60 110 L 60 165 L 90 165" />
+      <path d="M 84 159 L 90 165 L 84 171" />
+    </g>
+    <text x="510" y="150" font-size="10.5" opacity=".7">出事時硬體</text>
+    <text x="510" y="166" font-size="10.5" opacity=".7">自動往上抬</text>
+    <text x="512" y="182" font-size="10.5" opacity=".7">（自動）</text>
+
+    <text x="8" y="120" font-size="10.5" opacity=".7">往下只能</text>
+    <text x="8" y="136" font-size="10.5" opacity=".7">自己走</text>
+    <text x="8" y="152" font-size="10.5" fill="var(--accent)" font-weight="700">eret</text>
+  </g>
+</svg>
+<figcaption>權力往上是硬體自動的，往下沒有任何自動機制——只能用 <code>eret</code> 假裝「返回」</figcaption>
+</figure>
+
+<p>每一層都有<strong>自己一整套系統暫存器</strong>。名字後面的 <code>_EL1</code>、<code>_EL2</code> 就是在講「這個暫存器屬於哪一層」。例如例外向量表的位址，EL1 用 <code>VBAR_EL1</code>，EL2 用 <code>VBAR_EL2</code>，是兩個不同的暫存器。</p>
+
+<div class="callout">
+<span class="lbl">系統暫存器怎麼讀寫</span>
+<p>通用暫存器 <code>x0</code>–<code>x30</code> 可以直接拿來運算。系統暫存器不行，必須先搬出來：</p>
+<pre style="margin:10px 0 0"><code>mrs  x9, CurrentEL      系統暫存器 → 通用暫存器（<b>M</b>ove to <b>R</b>egister from <b>S</b>ystem）
+msr  hcr_el2, x9        通用暫存器 → 系統暫存器（<b>M</b>ove to <b>S</b>ystem <b>R</b>egister）</code></pre>
+</div>
+
+<h2><span class="num">4</span>為什麼要從 EL2 降到 EL1</h2>
+
+<p>直接講結論：<strong>今天不降也完全能跑。</strong> 實測把降級程式碼整段拿掉，核心在 EL2 照樣正常執行，沒有任何錯誤訊息。</p>
+
+<p>降級的理由全部在後面的里程碑：</p>
+
+<div class="tbl">
+<table>
+<tr><th>什麼時候</th><th>會用到的東西</th><th>待在 EL2 的話</th></tr>
+<tr><td>M3 例外處理</td><td><code>VBAR_EL1</code></td><td>要改用 <code>VBAR_EL2</code></td></tr>
+<tr><td>M5 開 MMU</td><td><code>TTBR0_EL1</code></td><td>要改用 <code>TTBR0_EL2</code></td></tr>
+<tr><td>M8 使用者模式</td><td>EL0 出事自動跳到 EL1</td><td>要額外設定才跳得到 EL2</td></tr>
+</table>
+</div>
+
+<p>而課本、Linux 原始碼、以及本專案參考的所有資料，走的都是 EL1 這條路。待在 EL2 會處處對不上。</p>
+
+<p>還有一個更直接的理由：<strong>兩個平台給的起點不一樣</strong>。不統一的話，M3 之後每一段跟特權等級有關的程式碼都要寫兩個版本。</p>
+
+<div class="callout myth">
+<span class="lbl">這個決定違反了專案自己的規則</span>
+<p>本專案的原則之一是「只寫現在就有作用的東西，判準是<strong>拿掉它現在會壞嗎</strong>」。而這段降級程式碼<strong>拿掉不會壞</strong>——嚴格講它應該推遲到 M3，因為那才是「我在哪一層」第一次真的產生差別的時間點（要設 <code>VBAR_EL1</code>）。</p>
+<p><strong>還是現在做的理由</strong>是 M1 的定位：這個里程碑的主題就是「把機器整理成一個乾淨的已知狀態，再交給 C 語言」。設堆疊指標、清 BSS 都是這件事，「現在在哪一層」同樣是那個狀態的一部分。若留到 M3，M1 交給 C 的會是一個「視平台而異」的狀態，跟這個里程碑的目的相違；而且屆時這段程式碼還要回頭改寫。</p>
+<p><strong>代價要記下來</strong>：多了十幾行今天不做也不會壞的程式碼；而且從此綁定了「核心跑在 EL1」這個前提。日後若要做 hypervisor（自己跑在 EL2、管理底下的客戶 OS），這個決定要整個推翻。目前的規劃裡沒有這件事。</p>
+</div>
+
+<h2><span class="num">5</span>降級是怎麼做到的</h2>
+
+<p>ARM 沒有「降低特權等級」這條指令。往上是硬體自動的（發生例外時），<strong>往下只能靠軟體自己走</strong>。</p>
+
+<p>唯一的辦法是借用 <code>eret</code>——它本來的用途是「例外處理完了，回到原本的地方」。既然「回去」的時候可以指定要回到哪一層，那就<strong>假裝自己剛處理完例外</strong>，把目的地填成 EL1，然後按下去。</p>
+
+<figure>
+<svg viewBox="0 0 700 250" role="img" aria-label="eret 用到的三個暫存器">
+  <g font-family="ui-monospace,monospace" font-size="12" fill="currentColor">
+    <defs>
+      <marker id="a1" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+        <path d="M0,0 L7,3.2 L0,6.4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      </marker>
+    </defs>
+    <rect x="40" y="20" width="250" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    <text x="56" y="38">HCR_EL2</text>
+    <text x="56" y="53" font-size="10.5" opacity=".7">到了那邊要守什麼規矩</text>
+    <text x="310" y="45" font-size="11" opacity=".8">bit31 (RW) = 1 → EL1 用 64 位元</text>
+
+    <rect x="40" y="72" width="250" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    <text x="56" y="90">SPSR_EL2</text>
+    <text x="56" y="105" font-size="10.5" opacity=".7">回去之後你是誰</text>
+    <text x="310" y="97" font-size="11" opacity=".8">0x3c5 → EL1h + 中斷全遮</text>
+
+    <rect x="40" y="124" width="250" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    <text x="56" y="142">ELR_EL2</text>
+    <text x="56" y="157" font-size="10.5" opacity=".7">回去之後從哪裡開始跑</text>
+    <text x="310" y="149" font-size="11" opacity=".8">el1_entry 的位址</text>
+
+    <line x1="165" y1="164" x2="165" y2="192" stroke="currentColor" stroke-width="1.4" marker-end="url(#a1)"/>
+    <rect x="70" y="192" width="190" height="38" rx="6" fill="var(--kern)" opacity=".25"/>
+    <rect x="70" y="192" width="190" height="38" rx="6" fill="none" stroke="var(--kern)" stroke-width="1.8"/>
+    <text x="165" y="216" text-anchor="middle" font-weight="700">eret</text>
+    <text x="280" y="216" font-size="11" opacity=".8">照著上面三個值出發</text>
+  </g>
+</svg>
+<figcaption>三個暫存器分別回答「規矩／身分／目的地」，<code>eret</code> 執行的瞬間就照當下的值走</figcaption>
+</figure>
+
+<h3>那些數值是怎麼來的</h3>
+
+<p><strong><code>HCR_EL2</code> 的 bit 31（RW）</strong>決定 EL1 用 64 位元還是 32 位元。實測這台機器上 <code>HCR_EL2</code> 開機時是 <code>0x0</code>，也就是 RW = 0 → <strong>EL1 是 32 位元</strong>。</p>
+
+<p>不設它會怎樣？直覺上會猜「A64 指令被當成 A32 解讀，整個亂掉」。<strong>實測不是這樣。</strong></p>
+
+<pre><code>eret 之前   EL = 2
+eret 之後   pc = 0x40000020（el1_entry）   EL = <b>2</b>   PSTATE.IL = <b>1</b>
+再一步      pc = 0x200</code></pre>
+
+<p><code>HCR_EL2.RW = 0</code>（EL1 是 32 位元）跟 <code>SPSR_EL2.M[4] = 0</code>（要求 64 位元）<strong>互相矛盾</strong>，這叫 <strong>illegal exception return</strong>（非法的例外返回）。硬體的處理方式是：<strong>不換層</strong>、把 <code>PSTATE</code> 的 <code>IL</code> 位元（bit 20，Illegal Execution state）設起來，然後下一次取指令就直接 trap 到例外向量。</p>
+
+<p>所以症狀跟「忘記先判斷 EL」很像（都是 <code>pc = 0x200</code>、<code>x10 = 0</code>），但成因完全不同：一個是在 EL1 誤碰 EL2 暫存器，一個是 <code>eret</code> 的兩個設定打架。<strong>A64 指令從頭到尾沒有被當成 A32 執行過。</strong></p>
+
+<p><strong><code>SPSR_EL2</code> 填 <code>0x3c5</code></strong>，拆開來看：</p>
+
+<figure>
+<svg viewBox="0 0 700 200" role="img" aria-label="SPSR_EL2 = 0x3c5 的位元欄位">
+  <g font-family="ui-monospace,monospace" fill="currentColor">
+    <rect x="166" y="52" width="184" height="42" fill="var(--mmio)" opacity=".22"/>
+    <rect x="396" y="52" width="46" height="42" fill="var(--ram)" opacity=".22"/>
+    <rect x="442" y="52" width="184" height="42" fill="var(--kern)" opacity=".22"/>
+    <rect x="74" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1" opacity="0.35"/>
+    <text x="97.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">11</text>
+    <text x="97.0" y="79" text-anchor="middle" font-size="15" opacity="0.35">0</text>
+    <rect x="120" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1" opacity="0.35"/>
+    <text x="143.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">10</text>
+    <text x="143.0" y="79" text-anchor="middle" font-size="15" opacity="0.35">0</text>
+    <rect x="166" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1"/>
+    <text x="189.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">9</text>
+    <text x="189.0" y="79" text-anchor="middle" font-size="15" font-weight="700">1</text>
+    <rect x="212" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1"/>
+    <text x="235.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">8</text>
+    <text x="235.0" y="79" text-anchor="middle" font-size="15" font-weight="700">1</text>
+    <rect x="258" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1"/>
+    <text x="281.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">7</text>
+    <text x="281.0" y="79" text-anchor="middle" font-size="15" font-weight="700">1</text>
+    <rect x="304" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1"/>
+    <text x="327.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">6</text>
+    <text x="327.0" y="79" text-anchor="middle" font-size="15" font-weight="700">1</text>
+    <rect x="350" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1" opacity="0.35"/>
+    <text x="373.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">5</text>
+    <text x="373.0" y="79" text-anchor="middle" font-size="15" opacity="0.35">0</text>
+    <rect x="396" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1"/>
+    <text x="419.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">4</text>
+    <text x="419.0" y="79" text-anchor="middle" font-size="15">0</text>
+    <rect x="442" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1"/>
+    <text x="465.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">3</text>
+    <text x="465.0" y="79" text-anchor="middle" font-size="15">0</text>
+    <rect x="488" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1"/>
+    <text x="511.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">2</text>
+    <text x="511.0" y="79" text-anchor="middle" font-size="15" font-weight="700">1</text>
+    <rect x="534" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1"/>
+    <text x="557.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">1</text>
+    <text x="557.0" y="79" text-anchor="middle" font-size="15">0</text>
+    <rect x="580" y="52" width="46" height="42" fill="none" stroke="currentColor" stroke-width="1"/>
+    <text x="603.0" y="41" text-anchor="middle" font-size="11" opacity="0.55">0</text>
+    <text x="603.0" y="79" text-anchor="middle" font-size="15" font-weight="700">1</text>
+    <path d="M 78 104 L 78 112 L 162 112 L 162 104" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.35"/>
+    <text x="120.0" y="131" text-anchor="middle" font-size="12.5" font-weight="400" opacity="0.35">保留</text>
+    <path d="M 170 104 L 170 112 L 346 112 L 346 104" fill="none" stroke="var(--mmio)" stroke-width="1.5"/>
+    <text x="258.0" y="131" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--mmio)">D A I F</text>
+    <path d="M 354 104 L 354 112 L 392 112 L 392 104" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.35"/>
+    <text x="373.0" y="131" text-anchor="middle" font-size="12.5" font-weight="400" opacity="0.35">保留</text>
+    <path d="M 400 104 L 400 112 L 438 112 L 438 104" fill="none" stroke="var(--ram)" stroke-width="1.5"/>
+    <text x="419.0" y="131" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ram)">M[4]</text>
+    <path d="M 446 104 L 446 112 L 622 112 L 622 104" fill="none" stroke="var(--kern)" stroke-width="1.5"/>
+    <text x="534.0" y="131" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--kern)">M[3:0]</text>
+    <text x="64" y="41" text-anchor="end" font-size="11" opacity="0.55">bit</text>
+    <text x="64" y="79" text-anchor="end" font-size="12" opacity="0.55">值</text>
+    <text x="74" y="26" font-size="13" font-weight="700">SPSR_EL2 = 0x3c5</text>
+    <text x="258.0" y="156" text-anchor="middle" font-size="10.5" opacity="0.62">DAIF 跨在 4-bit 分組的界線上，看十六進位對不出來</text>
+  </g>
+</svg>
+<figcaption>每一格一個 bit，欄位用括號標出範圍</figcaption>
+</figure>
+
+<div class="tbl">
+<table>
+<tr><th>欄位</th><th>值</th><th>意思</th></tr>
+<tr><td><code>M[3:0]</code>（bits[3:0]）</td><td><code>0101</code></td><td><strong>EL1h</strong>。<code>M[3:2] = 01</code> 是 EL 編號 → EL1；<code>M[1]</code> 保留為 0；<code>M[0] = 1</code> 是 SPSel → 用自己的 <code>SP_EL1</code>。跟 <code>CurrentEL</code> 一樣，EL 編號都放在 bits[3:2]</td></tr>
+<tr><td><code>M[4]</code>（bit 4）</td><td><code>0</code></td><td>降下去之後用 <strong>AArch64</strong>（64 位元）。這一位和 <code>HCR_EL2.RW</code> 講的是同一件事，兩邊都要對</td></tr>
+<tr><td><code>D A I F</code>（bits[9:6]）</td><td><code>1111</code></td><td>四種中斷<strong>全部遮起來</strong>。D=Debug、A=SError、I=IRQ、F=FIQ</td></tr>
+</table>
+</div>
+
+<p><strong>注意 <code>DAIF</code> 這個欄位跨在半位元組（4 bit）的分界上</strong>——bit9、bit8 屬於左邊那組，bit7、bit6 屬於中間那組。所以看 <code>0x3c5</code> 的十六進位寫法反而不容易對出來，要照上面的 bit 編號一格一格數。</p>
+
+<p>這個數字不是查表查來的，是<strong>抄 QEMU 自己的答案</strong>：M0 量過，QEMU 直接從 EL1 進入時 <code>$cpsr</code> 的低 12 位就是 <code>0x3c5</code>。我們只是把那個狀態手動複製一份。</p>
+
+<div class="tbl">
+<table>
+<tr><th></th><th>全名</th><th>遮起來的原因</th></tr>
+<tr><td><strong>D</strong></td><td>Debug 除錯例外</td><td rowspan="4">例外向量表要到 M3 才有。現在放中斷進來，CPU 會跳到一個空位址，而且因為沒有例外處理器，連錯誤訊息都不會有。<strong>先關起來，等有人接得住再開。</strong></td></tr>
+<tr><td><strong>A</strong></td><td>SError 非同步錯誤</td></tr>
+<tr><td><strong>I</strong></td><td>IRQ 一般中斷</td></tr>
+<tr><td><strong>F</strong></td><td>FIQ 快速中斷</td></tr>
+</table>
+</div>
+
+<h3>EL1h 和 EL1t 差在哪</h3>
+
+<p>每一層都有自己的堆疊指標。但 EL1 可以選要用<strong>自己的</strong> <code>SP_EL1</code>，還是<strong>借用</strong> <code>SP_EL0</code>：</p>
+
+<div class="tbl">
+<table>
+<tr><th>寫法</th><th>bits[3:0]</th><th>用哪支堆疊指標</th></tr>
+<tr><td><code>EL1h</code>（h = handler）</td><td><code>0101</code></td><td><code>SP_EL1</code> ← 我們要這個</td></tr>
+<tr><td><code>EL1t</code>（t = thread）</td><td><code>0100</code></td><td><code>SP_EL0</code></td></tr>
+</table>
+</div>
+
+<p><strong>只差最低那一個 bit。</strong> 填錯的話下一步設的堆疊指標會設到「沒人在用的那一支」，一呼叫函式就死，而且症狀完全看不出原因。</p>
+
+<h3>為什麼要先問「我在哪一層」</h3>
+
+<p>因為 QEMU 一般開機直接就是 EL1，而 <code>_EL2</code> 結尾的暫存器<strong>在 EL1 根本讀不到</strong>。不問就做，在 QEMU 上會當場觸發例外。</p>
+
+<p>「無聲當機」聽起來像形容詞，但它有具體的位址。實測把那三行判斷刪掉之後：</p>
+
+<pre><code>p/x $pc   →  0x200      <span style="opacity:.6">不是我們的程式碼</span>
+p $x10    →  0          <span style="opacity:.6">計數器一次都沒跑到</span></code></pre>
+
+<p><code>0x200</code> 不是隨機的。例外向量表的基底位址存在 <code>VBAR_EL1</code>，重置後是 <code>0</code>；而「同一層、同步例外」的入口在基底 + <code>0x200</code>。<strong>CPU 是規規矩矩地跳去處理例外了</strong>——只是那個位址上是記憶體垃圾，因為例外向量表要到 M3 才建。</p>
+
+<h2><span class="num">6</span>逐行拆解</h2>
+
+<pre><code>_start:
+    mrs     x9, CurrentEL           <span style="opacity:.6">讀「我在哪一層」</span>
+    cmp     x9, #(1 &lt;&lt; 2)           <span style="opacity:.6">跟 4 比（EL1 × 4）</span>
+    b.eq    el1_entry               <span style="opacity:.6">已經在 EL1 → 整段跳過</span>
+
+    mov     x9, #(1 &lt;&lt; 31)          <span style="opacity:.6">📋 規矩：EL1 用 64 位元</span>
+    msr     hcr_el2, x9
+    mov     x9, #0x3c5              <span style="opacity:.6">🪪 身分：EL1h、中斷全遮</span>
+    msr     spsr_el2, x9
+    adr     x9, el1_entry           <span style="opacity:.6">📍 目的地</span>
+    msr     elr_el2, x9
+    eret                            <span style="opacity:.6">出發</span>
+
+el1_entry:                          <span style="opacity:.6">兩條路在這裡會合，保證在 EL1</span></code></pre>
+
+<figure>
+<svg viewBox="0 0 700 450" role="img" aria-label="boot.S 的控制流：兩條路徑會合於 el1_entry">
+  <defs><marker id="cf" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+    <path d="M0,0 L7,3.2 L0,6.4" fill="none" stroke="currentColor" stroke-width="1.4"/></marker></defs>
+  <g font-family="ui-monospace,monospace" font-size="12" fill="currentColor">
+    <rect x="250" y="14" width="180" height="36" rx="6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+    <text x="340.0" y="36.0" text-anchor="middle" font-size="12" opacity="1">CPU 從 _start 開始</text>
+    <line x1="340" y1="50" x2="340" y2="72" stroke="currentColor" stroke-width="1.3" opacity=".7" marker-end="url(#cf)"/>
+    <path d="M 340 74 L 452 110 L 340 146 L 228 110 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="340" y="106" text-anchor="middle" font-size="12">讀 CurrentEL</text>
+    <text x="340" y="122" text-anchor="middle" font-size="11.5" opacity=".7">是 0x4（EL1）嗎？</text>
+    <line x1="452" y1="110" x2="584" y2="110" stroke="currentColor" stroke-width="1.3" opacity=".7"/>
+    <line x1="584" y1="110" x2="584" y2="378" stroke="currentColor" stroke-width="1.3" opacity=".7"/>
+    <text x="470" y="102" font-size="11" fill="var(--ram)" font-weight="700">是</text>
+    <text x="470" y="130" font-size="10.5" opacity=".65">QEMU 一般開機</text>
+    <text x="596" y="230" font-size="10.5" opacity=".65">整段跳過</text>
+    <line x1="228" y1="110" x2="116" y2="110" stroke="currentColor" stroke-width="1.3" opacity=".7"/>
+    <line x1="116" y1="110" x2="116" y2="156" stroke="currentColor" stroke-width="1.3" opacity=".7" marker-end="url(#cf)"/>
+    <text x="150" y="102" font-size="11" fill="var(--mmio)" font-weight="700" text-anchor="end">否</text>
+    <text x="196" y="130" font-size="10.5" opacity=".65" text-anchor="end">樹莓派／virtualization=on</text>
+    <rect x="16" y="158" width="200" height="42" rx="6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+    <text x="116.0" y="175.0" text-anchor="middle" font-size="12" opacity="1">填 HCR_EL2</text>
+    <text x="116.0" y="191.0" text-anchor="middle" font-size="10.5" opacity=".7">RW=1 → EL1 用 64 位元</text>
+    <line x1="116" y1="200" x2="116" y2="208" stroke="currentColor" stroke-width="1.3" opacity=".7" marker-end="url(#cf)"/>
+    <rect x="16" y="208" width="200" height="42" rx="6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+    <text x="116.0" y="225.0" text-anchor="middle" font-size="12" opacity="1">填 SPSR_EL2</text>
+    <text x="116.0" y="241.0" text-anchor="middle" font-size="10.5" opacity=".7">0x3c5 → EL1h、中斷全遮</text>
+    <line x1="116" y1="250" x2="116" y2="258" stroke="currentColor" stroke-width="1.3" opacity=".7" marker-end="url(#cf)"/>
+    <rect x="16" y="258" width="200" height="42" rx="6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+    <text x="116.0" y="275.0" text-anchor="middle" font-size="12" opacity="1">填 ELR_EL2</text>
+    <text x="116.0" y="291.0" text-anchor="middle" font-size="10.5" opacity=".7">el1_entry 的位址</text>
+    <line x1="116" y1="300" x2="116" y2="310" stroke="currentColor" stroke-width="1.3" opacity=".7" marker-end="url(#cf)"/>
+    <rect x="46" y="312" width="140" height="40" rx="6" fill="var(--kern)" opacity=".22"/>
+    <rect x="46" y="312" width="140" height="40" rx="6" fill="none" stroke="var(--kern)" stroke-width="1.8"/>
+    <text x="116.0" y="336.0" text-anchor="middle" font-size="13" opacity="1">eret</text>
+    <line x1="116" y1="352" x2="116" y2="378" stroke="currentColor" stroke-width="1.3" opacity=".7"/>
+    <line x1="116" y1="378" x2="584" y2="378" stroke="currentColor" stroke-width="1.3" opacity=".7"/>
+    <line x1="584" y1="352" x2="584" y2="378" stroke="currentColor" stroke-width="1.3" opacity=".7"/>
+    <line x1="350" y1="378" x2="350" y2="392" stroke="currentColor" stroke-width="1.3" opacity=".7" marker-end="url(#cf)"/>
+    <rect x="230" y="394" width="240" height="44" rx="6" fill="var(--ram)" opacity=".22"/>
+    <rect x="230" y="394" width="240" height="44" rx="6" fill="none" stroke="var(--ram)" stroke-width="1.8"/>
+    <text x="350.0" y="412.0" text-anchor="middle" font-size="12.5" opacity="1">el1_entry</text>
+    <text x="350.0" y="428.0" text-anchor="middle" font-size="10.5" opacity=".75">兩條路都到這裡，保證在 EL1</text>
+  </g>
+</svg>
+<figcaption>兩條路徑：EL1 進來的直接跳過，EL2 進來的填三個暫存器再用 <code>eret</code> 掉下來，會合於 <code>el1_entry</code></figcaption>
+</figure>
+
+<h3><code>adr</code> 是什麼指令</h3>
+
+<p><code>adr x9, el1_entry</code> 的意思是「把 <code>el1_entry</code> 這個標籤的<strong>位址</strong>放進 <code>x9</code>」——不是去那個位址讀值，是取位址本身。</p>
+
+<p>它跟另外兩個很像的寫法差在這裡：</p>
+
+<div class="tbl">
+<table>
+<tr><th>寫法</th><th>做什麼</th><th>範圍</th></tr>
+<tr><td><code>adr x9, label</code></td><td>取位址。<strong>用「現在的 PC 加一個位移」算出來</strong></td><td>±1 MB</td></tr>
+<tr><td><code>ldr x9, =label</code></td><td>取位址。編譯器把絕對位址存在附近，再讀出來</td><td>不限</td></tr>
+<tr><td><code>ldr x9, [x10]</code></td><td>去 <code>x10</code> 指的位址<strong>讀一個值</strong></td><td>—</td></tr>
+</table>
+</div>
+
+<p>這裡用 <code>adr</code> 有一個實際好處：它算出來的是<strong>相對</strong>位址，所以整段程式碼被搬到記憶體別的地方也照樣正確。<code>ldr =</code> 存的是絕對位址，搬家就錯了。M5 開 MMU 把核心搬到高位址時，這個差別會變得很重要。</p>
+
+<p>反組譯可以看到它確實被算成了絕對位址：</p>
+
+<pre><code>4000001c:  10000069   adr  x9, 40000028 &lt;el1_entry&gt;</code></pre>
+
+<h3>為什麼 <code>CurrentEL</code> 要跟 4 比</h3>
+
+<p><code>CurrentEL</code> 只有 bits[3:2] 有意義，其他位元永遠是 0。所以整個暫存器讀出來剛好是 <strong>EL 編號 × 4</strong>：</p>
+
+<pre><code>EL1  →  0b0100  =  0x4
+EL2  →  0b1000  =  0x8</code></pre>
+
+<h3>為什麼用 x9 / x10，不用 x0</h3>
+
+<p>AArch64 的開機協定規定 <strong><code>x0</code> 帶著 device tree 的位址</strong>，樹莓派的韌體就是這樣傳的。M0 的 <code>mov x0, xzr</code> 會把它洗掉——在 QEMU 上剛好無害（x0 本來就是 0），但移植到真機就是災難。</p>
+
+<p>所以現在所有暫用都改成 <code>x9</code>／<code>x10</code>，把 <code>x0</code>–<code>x3</code> 原封不動留給後面的里程碑。</p>
+
+<h2><span class="num">7</span>實測數據</h2>
+
+<p>這一節是<strong>數值彙整</strong>，方便日後查；操作步驟在第 2 節。量於 binutils 2.38 / gcc 11.4.0 / QEMU 6.2.0 / gdb 12.1（Ubuntu 22.04）。</p>
+
+<div class="callout">
+<span class="lbl">這些 _EL2 的值是怎麼量出來的</span>
+<p>gdb 12.1 讀不到 <code>HCR_EL2</code>、<code>SPSR_EL2</code>、<code>VBAR_EL1</code> 這些系統暫存器（一律回 <code>void</code>）。下面的數值是寫一段只做 <code>mrs</code> 的暫時核心，把值搬進通用暫存器再讀出來的：</p>
+<pre style="margin:10px 0 0"><code>_start:
+    mrs     x11, hcr_el2
+    mrs     x12, spsr_el2
+halt:
+    b       halt</code></pre>
+<p>這個手法對任何 gdb 讀不到的系統暫存器都適用，後面的里程碑會一直用到。</p>
+</div>
+
+<h3>兩種開機方式進來時的狀態</h3>
+
+<pre><code>$ qemu-system-aarch64 -M virt ...
+  CurrentEL = 0x4      → EL1
+
+$ qemu-system-aarch64 -M virt,virtualization=on ...
+  CurrentEL = 0x8      → EL2
+  HCR_EL2   = 0x0      → RW = 0，也就是「EL1 用 32 位元」
+  SPSR_EL2  = 0x0</code></pre>
+
+<h3>降級前後</h3>
+
+<div class="tbl">
+<table>
+<tr><th>開機方式</th><th>進入點的 EL</th><th>跑起來之後的 EL</th></tr>
+<tr><td><code>-M virt</code></td><td>1</td><td><strong>1</strong> ✅ 跳過降級</td></tr>
+<tr><td><code>-M virt,virtualization=on</code></td><td>2</td><td><strong>1</strong> ✅ 走完降級</td></tr>
+<tr><td>對照組：把降級程式碼拿掉</td><td>2</td><td><strong>2</strong> ❌ 卡在 EL2</td></tr>
+</table>
+</div>
+
+<p>最後一列是重點。<strong>這個實驗被刻意設計成可能失敗</strong>——有降級和沒降級預測不同的答案，所以結果才有意義。</p>
+
+<p>降級之後 <code>$cpsr</code> 讀出來是 <code>0x3c5</code>，跟我們寫進 <code>SPSR_EL2</code> 的值一模一樣，也跟 QEMU 直接進 EL1 時的低位相同。</p>
+
+<h2><span class="num">8</span>被推翻的直覺</h2>
+
+<div class="callout myth">
+<span class="lbl">直覺 1</span>
+<p><strong>「QEMU 加上 <code>-smp 4</code>，四顆核心就會一起衝進來，所以要寫程式篩選 core 0」</strong></p>
+<p>錯。實測 <code>-smp 4</code> 讓它自由跑三秒之後：</p>
+<pre style="margin:10px 0"><code>CPU#0  [running]  停在 halt_loop     ← 只有這顆跑了
+CPU#1  [halted ]  停在 _start
+CPU#2  [halted ]  停在 _start
+CPU#3  [halted ]  停在 _start        ← 一條指令都沒執行</code></pre>
+<p>QEMU 的 virt 機器<strong>不會在開機時放出副核心</strong>。它們被關在「電源關閉」狀態，要等軟體用 PSCI（Power State Coordination Interface，電源狀態協調介面）主動叫醒才會動。</p>
+<p>所以核心篩選的程式碼在 QEMU 上<strong>根本不會被執行到</strong>，寫了也驗不了。這件事整包留到 M9 移植樹莓派時再做——那時四顆核心才是真的一起進來。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 2</span>
+<p><strong>「跑在 EL2 權限比較高，應該什麼都能做，那待著就好」</strong></p>
+<p>權限確實比較高，而且今天真的照樣跑。但「權限高」不等於「方便」——每一層有自己一整套暫存器，EL2 那一套跟所有教材、Linux 原始碼用的都不一樣。</p>
+<p>更關鍵的是 M8：使用者程式跑在 EL0，出事時<strong>硬體預設把它送到 EL1</strong>。核心在 EL2 的話，這條最基本的路要額外設定才走得通。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 3</span>
+<p><strong>「<code>pkill -f qemu-system-aarch64</code> 可以安全地清掉殘留的 QEMU」</strong></p>
+<p>這條指令會把<strong>執行它的那個 shell 自己也殺掉</strong>。因為 <code>-f</code> 比對的是完整命令列，而執行這條指令的 shell，其命令列裡就含有 <code>qemu-system-aarch64</code> 這串字。</p>
+<p>症狀是指令沒有輸出、然後行程被 SIGTERM 收掉，離開碼 <strong>143</strong>（128 + 訊號 15）。</p>
+
+<p><strong>但這只在特定情境下會發生</strong>，實測分成兩種：</p>
+
+<div class="tbl">
+<table>
+<tr><th>誰執行這條指令</th><th>它自己的命令列</th><th>結果</th></tr>
+<tr><td>互動式終端機直接敲</td><td><code>-bash</code>，不含目標字串</td><td><strong>不會死</strong></td></tr>
+<tr><td>Makefile recipe、<code>bash -c '...'</code>、CI 腳本</td><td>含目標字串</td><td><strong>自殺</strong></td></tr>
+</table>
+</div>
+
+<p><code>pgrep -f</code> 有同樣的問題。那改成 <code>-x</code>（比對行程名而非命令列）呢？<strong>會遇到第二個坑</strong>：</p>
+
+<pre><code>$ ps -eo pid,comm | grep qemu
+   5132 qemu-system-aar          <span style="opacity:.6">← 名字被截斷了</span>
+
+$ pgrep -x qemu-system-aarch64   <span style="opacity:.6">（無輸出，找不到）</span>
+$ pgrep -x qemu-system-aar
+5132</code></pre>
+
+<p>Linux 的<strong>行程名（<code>comm</code>）上限是 15 個字元</strong>，而 <code>qemu-system-aarch64</code> 有 19 個。<code>-x</code> 要求完全相同，所以拿全名去比永遠比不到——<strong>而且不會有任何錯誤訊息，只是安靜地什麼都沒殺到</strong>。</p>
+
+<p>正確寫法：<code>pkill -x qemu-system-aar</code>（截斷後的名字），或用 <code>ss -ltnp</code> 從佔用的 port 反查 PID 再精確 kill。</p>
+</div>
+
+<h2><span class="num">9</span>精髓</h2>
+
+<ol>
+  <li><strong>權力往上是自動的，往下要自己走。</strong> 硬體只在出事時把你抬上去，從來不會主動把你放下來。降級是軟體的責任，而且要借用「返回」這個機制來完成。</li>
+  <li><strong>先問狀態，再動作。</strong> 同一份程式碼要能在兩種平台跑，唯一的辦法是先問「我現在是什麼情況」。不問就做，在其中一種平台上必然出事。</li>
+  <li><strong>沒有例外處理器的時候，所有錯誤都是無聲的。</strong> 這也是 DAIF 要先全遮的原因——不是因為中斷有害，是因為現在沒有人接得住。</li>
+</ol>
+
+<h2><span class="num">10</span>一頁式小抄</h2>
+
+<div class="cheat">
+<h3>三個暫存器</h3>
+<div class="tbl">
+<table>
+<tr><td><code>HCR_EL2</code></td><td>到了 EL1 要守什麼規矩</td><td>bit31 = 1 → 64 位元</td></tr>
+<tr><td><code>SPSR_EL2</code></td><td>回去之後是誰</td><td><code>0x3c5</code> → EL1h + DAIF 遮</td></tr>
+<tr><td><code>ELR_EL2</code></td><td>回去之後從哪跑</td><td><code>el1_entry</code></td></tr>
+</table>
+</div>
+
+<h3>關鍵數值</h3>
+<pre><code>CurrentEL = EL 編號 × 4      EL1 → 0x4    EL2 → 0x8
+SPSR bits[3:0]               0101 = EL1h  0100 = EL1t
+SPSR bits[9:6]               1111 = DAIF 全遮
+HCR_EL2 bit31 (RW)           1 = EL1 用 AArch64</code></pre>
+
+<h3>GDB 速查</h3>
+<pre><code>p/x $cpsr                看處理器狀態
+p ($cpsr &gt;&gt; 2) &amp; 3       取出 EL 編號
+info threads             確認幾顆核心在跑</code></pre>
+
+<h3>兩種開機方式</h3>
+<pre><code>qemu-system-aarch64 -M virt ...                     進來就 EL1
+qemu-system-aarch64 -M virt,virtualization=on ...   進來是 EL2</code></pre>
+</div>
+
+<footer>
+armos · 里程碑 M1 · 開發平台 QEMU virt，移植目標 Raspberry Pi 4（BCM2711）<br>
+程式碼：<code>kernel/boot.S</code>
+</footer>
+</div>
