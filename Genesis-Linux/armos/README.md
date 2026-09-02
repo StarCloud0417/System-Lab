@@ -81,6 +81,8 @@ make            # 建置（零警告，本專案使用 -Werror）
 make dump       # 反組譯 + ELF header + program header
 make qemu       # 在 QEMU 上執行（離開：先按 Ctrl-A，放開，再按 X）
 make debug      # QEMU 停在第一條指令並接上 GDB
+make qemu-el2   # 同上，但在 EL2 交接（模擬樹莓派韌體）
+make debug-el2  # 同 debug，但在 EL2 交接
 make dtb        # 印出 QEMU virt 的 device tree，查平台位址
 make clean
 ```
@@ -93,19 +95,25 @@ $ make dump          # Entry point address 應該是 0x40000000
 $ make debug
 ```
 
-`make debug` 會自動比對兩次 `x0`：
+`make debug` 會自動比對兩次 `x10`：
 
 ```
-Breakpoint 1, 0x0000000040000008 in halt_loop ()
+Breakpoint 1, 0x0000000040000030 in halt_loop ()
 $1 = 1
 
-Breakpoint 1, 0x0000000040000008 in halt_loop ()
+Breakpoint 1, 0x0000000040000030 in halt_loop ()
 $2 = 2
 (gdb)
 ```
 
 **兩個值不同就過關了。**這同時證明了兩件事：映像確實被載進記憶體（不然斷點不會
-命中），而且 CPU 確實在執行我們寫的指令（不然 `x0` 不會變）。
+命中），而且 CPU 確實在執行我們寫的指令（不然 `x10` 不會變）。
+
+計數器用 `x10` 而不是 `x0`，是因為 AArch64 的開機協定規定 `x0` 帶著 device tree
+的位址，樹莓派的韌體就是這樣傳的 —— 那幾顆暫存器要原封不動留給後面的里程碑。
+
+`make debug-el2` 會印出**一模一樣**的結果，但它是從 EL2 進入、自己降到 EL1 的。
+兩者相同，正是降級有效的證明。
 
 之所以要用一個遞增的計數器而不是一般的 `b .` 無窮迴圈，是因為停住的核心和空轉的
 核心從外面看完全一樣 —— `b .` 沒辦法分辨「映像正確執行」與「映像根本沒載進去」。
@@ -124,7 +132,8 @@ $2 = 2
 | 1 | `linker/kernel-qemu.ld` 的 `0x40000000` → `0x41000000` | `make && make dump` | `_start` 跟著搬家。**不需要 `make clean`**，因為 Makefile 把 linker script 列進了相依項 |
 | 2 | `kernel/boot.S` 的 `.text.boot` 拼錯成 `.txet.boot` | `make clean && make` | **零警告、零錯誤，而且照樣開得起來** |
 | 3 | 拿掉 Makefile 的 `-Wl,--build-id=none` | `make clean && make dump` | entry point 變成 `0x40000024` |
-| 4 | Makefile 的 `WARN` 加上 `-g` | `make clean && make debug` | 斷點從 `0x40000008` 跑回 `0x40000004`，第一次停時 `$1 = 0` |
+| 4 | Makefile 的 `WARN` 加上 `-g` | `make clean && make debug` | 斷點從 `0x40000030` 跑回 `0x4000002c`，第一次停時 `$1 = 0` |
+| 5 | 把 `boot.S` 從 `mov x9, #(1 << 31)` 到 `eret` 整段刪掉 | `make clean && make debug-el2` | 核心照樣跑，但 `p ($cpsr >> 2) & 3` 是 **2** —— 卡在 EL2 沒降下來 |
 
 實驗 2 是這個里程碑最重要的一課：**建置成功不等於做對了**。linker script 對
 section 名稱是純字串比對，打錯不會有任何錯誤訊息。
@@ -146,10 +155,10 @@ build/          建置產物（不進版控，可由原始碼完全重建）
 | 位置 | 回答什麼 |
 |---|---|
 | `git log` | **結果**：這個 commit 做了什麼、為什麼這樣選 |
-| `docs/guide/` | **原理**：為什麼會這樣運作，附實測數據與圖解 |
+| `docs/guide/` | **原理**：為什麼會這樣運作，附實測數據與圖解。目前有 [M0](docs/guide/m0-build-and-boot.html)、[M1](docs/guide/m1-boot-flow.html) |
 
 兩者不重複：commit message 記「這次改了什麼、為什麼」，教材記「它為什麼會這樣運作」。
-遇到需要長期記錄的取捨（例如平台位址的抽象方式）再另外開 ADR。
+設計上的取捨直接寫在對應的教材裡，跟原理放在一起。
 
 程式碼註解只留「為什麼這樣寫」的一兩句，完整說明在 `docs/guide/`，三個原始檔的
 檔頭都標了對應的章節。
@@ -158,11 +167,28 @@ build/          建置產物（不進版控，可由原始碼完全重建）
 
 ```asm
 _start:
-    mov     x0, xzr
+    mrs     x9, CurrentEL           /* 我在哪一層？ */
+    cmp     x9, #(1 << 2)
+    b.eq    el1_entry               /* 已經在 EL1 就跳過 */
+
+    mov     x9, #(1 << 31)          /* HCR_EL2.RW: EL1 用 AArch64 */
+    msr     hcr_el2, x9
+    mov     x9, #0x3c5              /* SPSR_EL2: EL1h, DAIF 全遮 */
+    msr     spsr_el2, x9
+    adr     x9, el1_entry
+    msr     elr_el2, x9
+    eret                            /* 往下走的唯一辦法 */
+
+el1_entry:
+    mov     x10, xzr
 halt_loop:
-    add     x0, x0, #1
+    add     x10, x10, #1
     b       halt_loop
 ```
 
-三條指令，12 bytes。載到 `0x4000_0000` —— 這個位址不是慣例，是 QEMU virt 這塊板子
+13 條指令，52 bytes。載到 `0x4000_0000` —— 這個位址不是慣例，是 QEMU virt 這塊板子
 自己的 device tree 說的，跑 `make dtb` 就看得到出處。
+
+前面那段是在處理「韌體把我們丟在哪一層」的差異：QEMU 一般開機直接就是 EL1，
+樹莓派和 `virtualization=on` 則是 EL2。原理見
+[`docs/guide/m1-boot-flow.html`](docs/guide/m1-boot-flow.html)。

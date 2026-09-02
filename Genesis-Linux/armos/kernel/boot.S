@@ -1,26 +1,33 @@
 /*
- * boot.S - Kernel entry point for the QEMU 'virt' machine.
+ * boot.S - Kernel entry point.
  *
- * First code the CPU runs after QEMU loads the image. Nothing is set up yet:
- * no stack, no zeroed .bss, no MMU, no C runtime - only x0-x30 and the PC are
- * usable, which is why this stays in assembly until M1.
+ * Firmware may hand us EL2 (Raspberry Pi, QEMU with virtualization=on) or
+ * EL1 (plain -M virt). Normalise that to "always EL1" before anything else.
  *
- * Full walkthrough: docs/guide/m0-build-and-boot.html (§5 boot.S, §7 myths 4-5)
+ * docs/guide/m1-boot-flow.html §4 §5 §6 — why, what each value means, line by line
  */
 
-/* "ax" = allocatable + executable. Matched by name from the linker script. */
 .section .text.boot, "ax"
 
 .global _start
 _start:
-    /* xzr reads as zero. Encoding 31 means XZR or SP depending on the form. */
-    mov     x0, xzr
+    /* Scratch in x9/x10: x0-x3 carry the boot protocol arguments. */
+    mrs     x9, CurrentEL           /* reads as EL * 4 */
+    cmp     x9, #(1 << 2)
+    b.eq    el1_entry
 
+    mov     x9, #(1 << 31)          /* HCR_EL2.RW: EL1 is AArch64 */
+    msr     hcr_el2, x9
+    mov     x9, #0x3c5              /* SPSR_EL2: EL1h, DAIF masked */
+    msr     spsr_el2, x9
+    adr     x9, el1_entry
+    msr     elr_el2, x9
+    eret                            /* the only way down a level */
+
+el1_entry:
+    /* Proof of life until the UART arrives in M2; a spinning core and a
+     * halted one look identical from outside. */
+    mov     x10, xzr
 halt_loop:
-    /*
-     * Not 'b .': a halted core and a spinning core look identical from the
-     * outside, so 'b .' cannot show that the image actually ran. An
-     * incrementing x0 can. Removed in M1, when real boot code takes over.
-     */
-    add     x0, x0, #1
+    add     x10, x10, #1
     b       halt_loop

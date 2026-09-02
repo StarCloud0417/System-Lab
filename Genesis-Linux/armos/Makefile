@@ -10,6 +10,9 @@ CC      := $(CROSS)gcc
 OBJDUMP := $(CROSS)objdump
 READELF := $(CROSS)readelf
 QEMU    := qemu-system-aarch64
+# virtualization=on 讓 QEMU 在 EL2 交接，模擬樹莓派韌體的行為
+MACHINE     := virt
+MACHINE_EL2 := virt,virtualization=on
 # gdb-multiarch 是 Debian/Ubuntu 的套件名；一般的 gdb 認不得 aarch64 目標
 GDB     := gdb-multiarch
 
@@ -47,7 +50,11 @@ dump: build/kernel.elf
 
 # 畫面全黑是正確的，UART 驅動要到 M2。離開：先按 Ctrl-A，放開，再按 X
 qemu: build/kernel.elf
-	$(QEMU) -M virt -cpu cortex-a72 -nographic -kernel $<
+	$(QEMU) -M $(MACHINE) -cpu cortex-a72 -nographic -kernel $<
+
+# 同上，但在 EL2 交接。核心會自己降到 EL1，畫面一樣是全黑的。
+qemu-el2: build/kernel.elf
+	$(QEMU) -M $(MACHINE_EL2) -cpu cortex-a72 -nographic -kernel $<
 
 # 唯一能證明 CPU 真的在執行的方法：-S 停在第一條指令，-s 開 GDB port 1234。
 # 序列埠寫檔而不用 -nographic，否則會跟前景的 GDB 搶同一個終端機。
@@ -57,22 +64,26 @@ debug: build/kernel.elf
 	    echo "（行程名被截成 15 字元；用全名比對不到，加 -f 又會殺到自己的 shell）"; \
 	    exit 1; \
 	fi
-	$(QEMU) -M virt -cpu cortex-a72 -display none -serial file:build/serial.log \
+	$(QEMU) -M $(MACHINE) -cpu cortex-a72 -display none -serial file:build/serial.log \
 	        -kernel $< -S -s & \
 	qemu_pid=$$!; \
 	$(GDB) -q $< \
 	    -ex 'target remote :1234' \
 	    -ex 'break halt_loop' \
-	    -ex 'continue' -ex 'print $$x0' \
-	    -ex 'continue' -ex 'print $$x0'; \
+	    -ex 'continue' -ex 'print $$x10' \
+	    -ex 'continue' -ex 'print $$x10'; \
 	kill $$qemu_pid 2>/dev/null || true
+
+# 同 debug，但在 EL2 交接。兩者印出的 x10 應該一模一樣 —— 那正是降級有效的證明。
+debug-el2: build/kernel.elf
+	@$(MAKE) --no-print-directory debug MACHINE='$(MACHINE_EL2)'
 
 # 0x40000000 的出處：輸出裡的 memory 節點（需要 device-tree-compiler）
 dtb: | build
-	$(QEMU) -M virt -cpu cortex-a72 -machine dumpdtb=build/virt.dtb -nographic
+	$(QEMU) -M $(MACHINE) -cpu cortex-a72 -machine dumpdtb=build/virt.dtb -nographic
 	dtc -I dtb -O dts build/virt.dtb
 
 clean:
 	rm -rf build
 
-.PHONY: all check-env dump qemu debug dtb clean
+.PHONY: all check-env dump qemu qemu-el2 debug debug-el2 dtb clean
