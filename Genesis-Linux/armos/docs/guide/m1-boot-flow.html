@@ -26,6 +26,7 @@ h1{font-size:2.1rem;line-height:1.25;margin:0 0 12px;letter-spacing:-.01em}
 h2{font-size:1.28rem;margin:56px 0 4px;padding-top:24px;border-top:1px solid var(--rule);letter-spacing:-.005em}
 h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:.5em;font-weight:600}
 h3{font-size:1rem;margin:32px 0 8px;color:var(--accent)}
+h4{font-size:.92rem;margin:24px 0 6px;color:var(--fg);opacity:.85}
 p{margin:14px 0}
 ul,ol{margin:14px 0;padding-left:1.4em}
 li{margin:7px 0}
@@ -60,7 +61,7 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
 <header>
   <p class="kicker">armos · 里程碑 M1</p>
   <h1>開機流程：從韌體手上接過機器</h1>
-  <p class="sub">M0 讓 CPU 跑起來了。M1 要把它整理成一個乾淨的已知狀態，才能交給 C 語言</p>
+  <p class="sub">M0 讓 CPU 跑起來了。M1 要把它整理成一個乾淨的已知狀態——固定的層級、一個堆疊、一塊歸零的記憶體——才能交給 C 語言</p>
 </header>
 
 <h2><span class="num">1</span>要解決什麼問題</h2>
@@ -78,17 +79,28 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
 </table>
 </div>
 
+<p>（<strong>SP</strong> 是堆疊指標，記著「暫存不下的東西放在記憶體哪裡」，第 7 節細講；<strong>BSS</strong> 是編譯器放「沒給初始值的全域變數」的地方，第 8 節細講。這兩個名詞現在知道大概是什麼就好。）</p>
+
 <p>C 語言完全不知道這些事。它假設：有一個能用的堆疊、未初始化的全域變數是 0、而且只有一個執行流程。這三件事<strong>沒有人會幫你準備</strong>。</p>
 
 <p>所以 M1 的工作是：把上面那張表的差異抹平，變成一個固定的起點，然後才跳進 C。</p>
 
 <h2><span class="num">2</span>動手：跑起來看</h2>
 
-<p>這個里程碑的重點是「同一份程式在兩種起點下都要落在 EL1」，所以要跑兩次。五步，大約十分鐘。</p>
+<div class="callout">
+<span class="lbl">想從零疊一遍？看 lab/m1</span>
+<p>這一節是<strong>拿完成品去拆</strong>——先跑通，再刻意弄壞。</p>
+<p><code>lab/m1/</code> 是另一個方向：<strong>從三行組語疊到完整的 <code>boot.S</code></strong>，九個階梯，每一階都是被上一階的失敗逼出來的。位址自動查，不用手打。</p>
+<pre style="margin:10px 0 0"><code>cd lab/m1
+make            <span style="opacity:.6">看有哪些階梯</span>
+make step1      <span style="opacity:.6">從頭開始</span></code></pre>
+</div>
+
+<p>M1 要交出三件事：<strong>不管從哪一層進來，最後都落在 EL1</strong>、<strong>有一個能用的堆疊</strong>、<strong>沒給初值的全域變數真的是 0</strong>。五步，大約十五分鐘。</p>
 
 <div class="callout">
 <span class="lbl">這一節不需要看懂名詞</span>
-<p>底下會出現 <code>CurrentEL</code>、<code>HCR_EL2</code>、<code>eret</code>、<code>mrs</code> 這些東西，<strong>現在都不用懂</strong>。這一節的目的是先讓你<strong>看到現象</strong>——尤其是步驟 5 那兩種當機的樣子。看過之後再讀第 3 節之後的解釋，會比一開始就啃名詞好記得多。</p>
+<p>底下會出現 <code>CurrentEL</code>、<code>HCR_EL2</code>、<code>eret</code>、<code>mrs</code>、<code>.bss</code> 這些東西，<strong>現在都不用懂</strong>。這一節的目的是先讓你<strong>看到現象</strong>——尤其是步驟 5 那幾種當機的樣子。看過之後再讀第 3 節之後的解釋，會比一開始就啃名詞好記得多。</p>
 <p>每個名詞第一次出現時都標了在第幾節解釋，想先查也可以。</p>
 </div>
 
@@ -96,7 +108,8 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
 
 <pre><code>$ make
 aarch64-linux-gnu-gcc -Wall -Wextra -Werror -ffreestanding -nostdlib -static \
-    -Wl,-T,linker/kernel-qemu.ld -Wl,--build-id=none -o build/kernel.elf kernel/boot.S</code></pre>
+    -Wl,-T,linker/kernel-qemu.ld -Wl,--build-id=none -o build/kernel.elf \
+    kernel/boot.S kernel/start.c</code></pre>
 
 <h3>步驟 2：看反組譯，確認控制流</h3>
 
@@ -115,46 +128,80 @@ aarch64-linux-gnu-gcc -Wall -Wextra -Werror -ffreestanding -nostdlib -static \
     40000024:  d69f03e0   eret
 
 0000000040000028 &lt;el1_entry&gt;:
-    40000028:  aa1f03ea   mov  x10, xzr</code></pre>
+    40000028:  58000189   ldr  x9, 40000058     <span style="opacity:.6">← __stack_top</span>
+    4000002c:  9100013f   mov  sp, x9
+    40000030:  58000189   ldr  x9, 40000060     <span style="opacity:.6">← __bss_start</span>
+    40000034:  580001aa   ldr  x10, 40000068    <span style="opacity:.6">← __bss_end</span>
 
-<p>（<code>mrs</code> 是「把系統暫存器搬到通用暫存器」，<code>eret</code> 是往下降一層的唯一辦法，<code>adr</code> 是取位址——分別在第 3、5、6 節解釋。）</p>
+0000000040000038 &lt;bss_zero&gt;:
+    40000038:  eb0a013f   cmp  x9, x10
+    4000003c:  54000062   b.cs 40000048 &lt;enter_c&gt;      <span style="opacity:.6">// b.hs</span>
+    40000040:  a8817d3f   stp  xzr, xzr, [x9], #16
+    40000044:  17fffffd   b    40000038 &lt;bss_zero&gt;
 
-<p>objdump 在 <code>b.eq</code> 後面印的 <code>// b.none</code> <strong>不是錯誤</strong>——那兩個是同一個機器碼的兩種助憶符（同一個條件碼在不同語境有不同名字）。</p>
+0000000040000048 &lt;enter_c&gt;:
+    40000048:  94000013   bl   40000094 &lt;kernel_main&gt;</code></pre>
+
+<p>（<code>mrs</code> 是「把系統暫存器搬到通用暫存器」，<code>eret</code> 是往下降一層的唯一辦法，<code>adr</code> 是取位址，<code>stp</code> 是一次存兩個暫存器——分別在第 3、5、6、8 節解釋。）</p>
+
+<p>objdump 在 <code>b.eq</code> 後面印的 <code>// b.none</code>、在 <code>b.cs</code> 後面印的 <code>// b.hs</code> <strong>都不是錯誤</strong>——那是同一個機器碼的不同助憶符（同一個條件碼在不同語境有不同名字）。</p>
 
 <h3>步驟 3：一般開機（進來就是 EL1）</h3>
 
 <pre><code>$ make debug
 
-Breakpoint 1, 0x0000000040000030 in halt_loop ()
-$1 = 1
-
-Breakpoint 1, 0x0000000040000030 in halt_loop ()
-$2 = 2
+Breakpoint 1, 0x000000004000009c in kernel_main ()
+SP        = $1 = 0x400100f0
+EL        = $2 = 1
+bss 清了嗎 = $3 = 0
 (gdb)</code></pre>
 
-<p>停在 <code>(gdb)</code> 之後，確認自己在 EL1：</p>
-
-<pre><code>(gdb) p/x $cpsr
-$3 = 0x600003c5
-(gdb) p ($cpsr &gt;&gt; 2) &amp; 3
-$4 = 1                <span style="opacity:.6">← EL1</span></code></pre>
+<p>三個數字各對應 M1 的一件事：<strong>EL 是 1</strong>（降級成功或本來就在）、<strong>SP 不是 0</strong>（堆疊有設）、<strong><code>boot_counter</code> 是 0</strong>（<code>.bss</code> 清過了）。</p>
 
 <div class="callout">
-<span class="lbl">怎麼讀 CurrentEL（這顆暫存器是什麼，第 3 節會講）</span>
-<p><code>p $CurrentEL</code> 在 gdb 12.1 會回 <code>void</code>——它沒有把這顆系統暫存器暴露給遠端目標。兩種替代做法：</p>
-<p><strong>方法一：從 PSTATE 反推。</strong><code>p ($cpsr &gt;&gt; 2) &amp; 3</code>，取 bits[3:2]。這是最方便的。</p>
-<p><strong>方法二：讓程式自己讀給你看。</strong> 我們的 <code>_start</code> 第一行就是 <code>mrs x9, CurrentEL</code>，執行完 <code>x9</code> 裡就是答案。</p>
-<p><strong>但不能直接在 <code>make debug</code> 的提示字元下 <code>stepi</code>。</strong> 那個目標為了自動比對兩次 x10，已經 <code>continue</code> 過兩次，等你拿到 <code>(gdb)</code> 時程式早就跑到 <code>halt_loop</code> 了，這時 <code>stepi</code> 只是在迴圈裡踏步，<code>x9</code> 讀出來會是 <code>0x40000028</code>（<code>adr</code> 留下的殘值），不是 EL 編號。</p>
-<p>要看進入點，得自己起一份不會自動 continue 的：</p>
-<pre style="margin:10px 0 0"><code>$ qemu-system-aarch64 -M virt -cpu cortex-a72 -display none \
-      -serial null -kernel build/kernel.elf -S -gdb tcp::12345 &amp;
-$ gdb-multiarch -q build/kernel.elf -ex 'target remote :12345'
+<span class="lbl">SP 為什麼是 0x400100f0，不是 __stack_top 的 0x40010100？</span>
+<p>差了 16，不是 bug。<code>break kernel_main</code> 下的斷點會<strong>跳過函式序言（prologue）</strong>——也就是 <code>stp x29, x30, [sp, #-16]!</code> 那一條。等你看到提示字元，那 16 個 byte 已經推上去了。第 7.1 節有單步的完整過程。</p>
+</div>
 
-(gdb) stepi          <span style="opacity:.6">執行第一條指令 mrs x9, CurrentEL</span>
+<div class="callout">
+<span class="lbl">先講 <code>$cpsr</code> 是什麼</span>
+<p>AArch64 把「處理器目前的狀態」叫做 <strong>PSTATE</strong>（processor state）——現在在哪一層、中斷有沒有被遮、上一次比較的結果是什麼，全都在裡面。</p>
+<p><strong>但 gdb 裡沒有 <code>$pstate</code>，要打 <code>$cpsr</code>。</strong> CPSR 是 32 位元 ARM 時代的名字，gdb 沿用了它來裝 AArch64 的 PSTATE。<strong>看到 <code>$cpsr</code> 不要以為教材寫錯暫存器了</strong>，這只是個歷史包袱。</p>
+<p>它的 bits[3:2] 就是目前的 EL 編號，所以 <code>p ($cpsr &gt;&gt; 2) &amp; 3</code> 隨時問得到「我在第幾層」。<code>make debug</code> 印的 <code>EL</code> 就是這樣算的。</p>
+</div>
+
+<div class="callout">
+<span class="lbl">gdb 讀得到哪些系統暫存器</span>
+<p>QEMU 的 gdb 介面開放了幾百顆暫存器（<code>maint print remote-registers</code> 列得出來），<strong>而且數量跟著機器變</strong>：</p>
+<pre style="margin:10px 0"><code>-M virt                     383 顆
+-M virt,virtualization=on   411 顆</code></pre>
+<p>差的不是整整 28 顆，而是<strong>多 29 顆、少 1 顆</strong>：多的是 <code>HCR_EL2</code>、<code>SPSR_EL2</code>、<code>VBAR_EL2</code> 這類<strong>EL2 的控制暫存器</strong>；少的是 <code>RVBAR_EL1</code>——QEMU 只在「最高的那一層」暴露 <code>RVBAR</code>，開了 EL2 之後它就變成 <code>RVBAR_EL2</code> 了。</p>
+<p>（<code>-M virt</code> 下並非完全沒有帶 <code>_EL2</code> 字樣的暫存器，<code>ACTLR_EL2</code>、<code>DACR32_EL2</code> 等四顆還在，也讀得到值。<strong>「名字裡有 _EL2」和「這台機器有 EL2」是兩件事。</strong>）</p>
+<p><code>HCR_EL2</code>、<code>SPSR_EL2</code>、<code>TTBR0_EL1</code>、<code>ESR_EL1</code> 這些後面會用到的，<strong>都讀得到</strong>（<code>_EL2</code> 那幾顆要用 <code>virtualization=on</code> 開機）：</p>
+<pre style="margin:10px 0"><code>(gdb) p/x $HCR_EL2      0x0        <span style="opacity:.6">降級之後 0x80000000</span>
+(gdb) p/x $SPSR_EL2     0x0        <span style="opacity:.6">降級之後 0x3c5</span>
+(gdb) p/x $VBAR         0x0        <span style="opacity:.6">EL1 的向量表基底</span>
+(gdb) p/x $SCTLR        0xc50838   <span style="opacity:.6">EL1 的系統控制</span></code></pre>
+<p><strong>回 <code>void</code> 有三種原因，別搞混：</strong></p>
+<div class="tbl">
+<table>
+<tr><th>症狀</th><th>原因</th><th>怎麼辦</th></tr>
+<tr><td><code>$hcr_el2</code> → <code>void</code></td><td>小寫</td><td>一律大寫：<code>$HCR_EL2</code></td></tr>
+<tr><td><code>$VBAR_EL1</code> → <code>void</code></td><td>名字錯。EL1 的 <code>VBAR</code>／<code>SCTLR</code> 不帶後綴（但 <code>TTBR0_EL1</code> 之類的又要帶）</td><td><code>$VBAR</code></td></tr>
+<tr><td><code>$HCR_EL2</code> → <code>void</code>，<strong>而且是用 <code>-M virt</code> 開機</strong></td><td><strong>這台機器沒有 EL2</strong>，那 29 顆 EL2 控制暫存器不在清單裡</td><td>改用 <code>virtualization=on</code></td></tr>
+<tr><td><code>$CurrentEL</code> → <code>void</code></td><td>真的沒有這一顆</td><td>見下面</td></tr>
+</table>
+</div>
+<p>命名不一致，記不起來很正常——<strong>用 <code>maint print remote-registers</code> 查</strong>就好。</p>
+<p><strong>唯一真的沒有的是 <code>$CurrentEL</code>。</strong> 想直接看它，只能讓程式自己讀給你看。我們的 <code>_start</code> 第一行就是 <code>mrs x9, CurrentEL</code>：</p>
+<pre style="margin:10px 0 0"><code>$ qemu-system-aarch64 -M virt -cpu cortex-a72 -display none \
+      -serial none -kernel build/kernel.elf -S -s &amp;
+$ gdb-multiarch -q build/kernel.elf -ex 'target remote :1234'
+
+(gdb) stepi          <span style="opacity:.6">執行第一條 mrs x9, CurrentEL</span>
 (gdb) p/x $x9
-$1 = 0x4             <span style="opacity:.6">← 一般開機；換成 virt,virtualization=on 會是 0x8</span></code></pre>
-<p>這也是為什麼<strong>方法一比較實用</strong>：<code>p ($cpsr &gt;&gt; 2) &amp; 3</code> 任何時候都問得到，不必care程式跑到哪了。</p>
-<p>同一個限制對 <code>HCR_EL2</code>、<code>SPSR_EL2</code>、<code>VBAR_EL1</code> 全都適用——gdb 12.1 一律回 <code>void</code>。想看那些暫存器，就寫一小段只做 <code>mrs</code> 的暫時程式，讓它把值搬進通用暫存器。第 7 節那兩個 <code>_EL2</code> 的值就是這樣量出來的。</p>
+$1 = 0x4             <span style="opacity:.6">← 一般開機；virt,virtualization=on 會是 0x8</span></code></pre>
+<p>不過實務上用 <code>p ($cpsr &gt;&gt; 2) &amp; 3</code> 就夠了，兩者答案一樣。</p>
 </div>
 
 <h3>步驟 4：用 EL2 開機（模擬樹莓派）</h3>
@@ -170,65 +217,93 @@ $ make debug-el2     <span style="opacity:.6">停在第一條指令並接上 GDB
     -display none -serial file:build/serial.log \
     -kernel build/kernel.elf -S -s</code></pre>
 
-<p><code>make debug-el2</code> 應該印出跟步驟 3 <strong>一模一樣</strong>的 <code>$1 = 1</code> / <code>$2 = 2</code>。停在 <code>(gdb)</code> 之後確認自己在 EL1：</p>
+<p><code>make debug-el2</code> 印出來的三個值跟步驟 3 <strong>一模一樣</strong>：</p>
 
-<pre><code>(gdb) p ($cpsr &gt;&gt; 2) &amp; 3
-$3 = 1                     <span style="opacity:.6">← 進來時是 EL2，現在已經降到 EL1</span>
-(gdb) p/x $cpsr
-$4 = 0x3c5                 <span style="opacity:.6">← 正是我們寫進 SPSR_EL2 的值</span></code></pre>
+<pre><code>SP        = $1 = 0x400100f0
+EL        = $2 = 1
+bss 清了嗎 = $3 = 0</code></pre>
 
-<p><strong>兩個目標印出相同的 x10，但走的路完全不同</strong>——這就是降級有效的證明。</p>
+<p><strong>兩個目標走的路完全不同，結果卻一個字都不差</strong>——這就是「把起點統一」有效的證明。</p>
 
-<p>順帶一提，兩條路徑的 <code>$cpsr</code> 高位不一樣：一般開機是 <code>0x600003c5</code>，EL2 路徑是 <code>0x3c5</code>。差的 <code>0x6000_0000</code> 是條件旗標 NZCV，一般開機那條被 <code>cmp</code> 設過，而 EL2 那條在 <code>eret</code> 時被 <code>SPSR_EL2</code> 的值整個覆蓋掉了。低 12 位才是我們關心的狀態。</p>
+<p>連 <code>$cpsr</code> 都一樣，兩邊都是 <code>0x600003c5</code>。高位的 <code>0x6000_0000</code> 是條件旗標 NZCV，被清 <code>.bss</code> 那個迴圈最後一次 <code>cmp</code> 設成同樣的值了；低 12 位 <code>0x3c5</code> 正是我們寫進 <code>SPSR_EL2</code> 的那個數。</p>
 
 <h3>步驟 5：把它弄壞（最重要的一步）</h3>
 
-<p>前四步都在確認「一切正常」。真正學到東西是靠看壞掉的樣子。
+<p>前四步都在確認「一切正常」。真正學到東西是靠看壞掉的樣子。</p>
 
-<div class="callout">
-<span class="lbl">先確認怎麼復原</span>
-<p>如果 M1 的改動<strong>還沒 commit</strong>，<code>git checkout .</code> 會把 <code>boot.S</code> 打回上一個 commit 的版本，整段降級程式碼就消失了。先用 <code>git stash</code> 存起來（<code>git stash pop</code> 拿回來），或先 commit 再做實驗。</p>
-</div>
-
-<p>三個實驗：</p></p>
+<p><strong>這五個實驗 <code>lab/m1</code> 都幫你跑好了</strong>，位址會自動查，不用改任何檔案：</p>
 
 <div class="tbl">
 <table>
-<tr><th>#</th><th>做什麼</th><th>然後</th><th>你會看到</th></tr>
-<tr><td>1</td><td>把 <code>boot.S</code> 從 <code>mov x9, #(1 &lt;&lt; 31)</code> 到 <code>eret</code> 整段刪掉</td><td><code>make clean &amp;&amp; make debug-el2</code></td><td>核心照樣跑（<code>$1=1, $2=2</code>），但 <code>p ($cpsr &gt;&gt; 2) &amp; 3</code> 是 <strong>2</strong> —— 卡在 EL2</td></tr>
-<tr><td>2</td><td>只刪掉開頭三行（<code>mrs</code> / <code>cmp</code> / <code>b.eq</code>），保留降級</td><td><code>make clean &amp;&amp; make debug</code></td><td><strong>當機</strong>，而且沒有任何錯誤訊息。詳見下面</td></tr>
-<tr><td>3</td><td>只刪掉 <code>mov x9, #(1 &lt;&lt; 31)</code> 和 <code>msr hcr_el2, x9</code> 兩行</td><td><code>make clean &amp;&amp; make debug-el2</code></td><td>症狀跟實驗 2 幾乎一樣（<code>pc = 0x200</code>、<code>x10 = 0</code>），但 <code>EL</code> 是 <strong>2</strong> 不是 1 —— 成因完全不同</td></tr>
+<tr><th>#</th><th>拿掉什麼</th><th>指令</th><th>你會看到</th></tr>
+<tr><td>1</td><td>整段降級</td><td><code>make step6</code></td><td>核心照樣跑，但 <code>EL = 2</code> —— 卡在 EL2</td></tr>
+<tr><td>2</td><td>開頭三行層級判斷</td><td><code>make step8</code></td><td><strong>當機</strong>，<code>pc = 0x200</code>、<code>EL = 1</code></td></tr>
+<tr><td>3</td><td><code>HCR_EL2</code> 那兩行</td><td><code>make norw</code></td><td>症狀幾乎一樣，但 <code>EL = 2</code>、<code>PSTATE.IL = 1</code> —— 成因完全不同</td></tr>
+<tr><td>4</td><td><code>mov sp, x9</code></td><td><code>make step3</code></td><td><code>SP = 0x0</code>，一執行 <code>stp</code> 就飛到 <code>0x200</code>。第 7.5 節</td></tr>
+<tr><td>5</td><td><code>bss_zero</code> 整個迴圈</td><td><code>make step4</code></td><td>C 跑得起來，但開機前塞的髒值原封不動留著。第 8.4 節</td></tr>
 </table>
 </div>
 
-<p>（實驗 1 對應第 4 節「為什麼要降」，實驗 2、3 對應第 5 節。看不懂沒關係，先看現象。）</p>
+<p>（實驗 1 對應第 4 節，實驗 2、3 對應第 5 節，實驗 4 對應第 7 節，實驗 5 對應第 8 節。）</p>
+
+<div class="callout">
+<span class="lbl">想自己動手改 repo 的檔案？先確認怎麼復原</span>
+<p>如果 M1 的改動<strong>還沒 commit</strong>，<code>git checkout .</code> 會把檔案打回上一個 commit 的版本，整段改動就消失了。先用 <code>git stash</code> 存起來（<code>git stash pop</code> 拿回來），或先 commit 再做實驗。</p>
+<p>（<code>lab/m1</code> 的九階是獨立的檔案，怎麼玩都不會動到 <code>kernel/</code>。）</p>
+</div>
 
 <p>實驗 2 值得看清楚。少了「先問樓層」，在 QEMU 一般開機（已經是 EL1）就會直接去寫 <code>HCR_EL2</code>，而那顆暫存器在 EL1 讀不到：</p>
 
 <pre><code>(gdb) p/x $pc
 $1 = 0x200                 <span style="opacity:.6">← 不是我們的程式碼</span>
-(gdb) p $x10
-$2 = 0                     <span style="opacity:.6">← 計數器一次都沒跑到</span>
 (gdb) x/2i $pc
 =&gt; 0x200:  adr  x16, 0x60845
-   0x204:  udf  #12336     <span style="opacity:.6">← 這是記憶體垃圾，不是指令</span></code></pre>
+   0x204:  udf  #12336     <span style="opacity:.6">← 這不是指令，是被當成指令的資料</span></code></pre>
 
-<p><strong><code>0x200</code> 這個位址不是隨機的。</strong> 例外向量表的基底位址存在 <code>VBAR_EL1</code>，它重置後是 0；而「同一層、同步例外」的入口剛好在基底 + <code>0x200</code>。所以 CPU 是規規矩矩地跳去處理例外了——只是那個位址上什麼都沒有，因為例外向量表要到 M3 才會建。</p>
+<p><strong><code>0x200</code> 這個位址不是隨機的。</strong> 例外向量表的基底位址存在 <code>VBAR_EL1</code>，它重置後是 0；而「同一層、同步例外」的入口剛好在基底 + <code>0x200</code>。所以 CPU 是規規矩矩地跳去處理例外了——只是那裡沒有向量表，要到 M3 才會建。</p>
 
-<p>這就是本專案反覆強調的那種失敗：<strong>沒有錯誤訊息，只有一個跑到不知道哪裡去的 PC。</strong></p>
+<p><strong>那裡是什麼？也查得到，而且很有意思：</strong></p>
 
-<p><strong>實驗 3 值得跟實驗 2 對照著看。</strong> 兩者的 <code>pc</code> 都停在 <code>0x200</code>、<code>x10</code> 都是 0，看起來像同一個問題，但：</p>
+<pre><code>(gdb) x/2xw 0x0
+0x0:  0xedfe0dd0  0x00001000
+
+(gdb) x/4xb 0x0
+0x0:  0xd0  0x0d  0xfe  0xed      <span style="opacity:.6">← 一個 byte 一個 byte 讀：d00dfeed</span>
+
+(gdb) x/s 0x200
+0x200: "020000"                   <span style="opacity:.6">← DTB 的字串區</span></code></pre>
+
+<p><code>x/2xw</code> 印的是一個 32 位元的<strong>數</strong>，而 magic 在檔案裡是<strong>四個 byte</strong>，所以顯示順序看起來是反的。<code>x/4xb</code> 一個 byte 一個 byte 印才對得起來。<strong>不是跑錯了。</strong></p>
+
+<p>QEMU 把這台機器的 device tree 放在位址 0（總長 1 MB），所以 <code>0x200</code> 落在它的字串區裡面。CPU 是在<strong>把 device tree 的 ASCII 當成指令執行</strong>——難怪印出來是 <code>adr x16, 0x60845</code> 和 <code>udf</code>。第 6 節會講到 <code>x0</code> 帶著 device tree 位址，講的就是這個東西。</p>
+
+<p>這就是本專案反覆強調的那種失敗：<strong>沒有錯誤訊息，只有一個跑到不知道哪裡去的 PC。</strong>實驗 4 的堆疊沒設、第 7.6 節的堆疊爆掉，最後都落在同一個 <code>0x200</code>——<strong>三種完全不同的錯，長成同一個樣子</strong>。這正是 M3 要先蓋例外向量表的原因。</p>
+
+<p><strong>實驗 3 值得跟實驗 2 對照著看。</strong> 兩者的 <code>pc</code> 都停在 <code>0x200</code>，看起來像同一個問題，但：</p>
 
 <div class="tbl">
 <table>
 <tr><th></th><th>實驗 2（沒判斷 EL）</th><th>實驗 3（沒設 RW）</th></tr>
 <tr><td>發生在哪</td><td><code>msr hcr_el2</code> 當下</td><td><code>eret</code> 之後的下一次取指令</td></tr>
 <tr><td>當時的 EL</td><td>1</td><td><strong>2</strong>（換層失敗了）</td></tr>
+<tr><td><code>sp</code></td><td><code>0x0</code></td><td><code>0x0</code></td></tr>
+<tr><td><code>ESR_EL1</code>（例外原因）</td><td><code>0x2000000</code><br><span style="opacity:.7">EC = bits[31:26] = <code>0x0</code>，Unknown</span></td><td>—<br><span style="opacity:.7">還在 EL2，要看 <code>ESR_EL2</code></span></td></tr>
 <tr><td>原因</td><td>在 EL1 碰 EL2 的暫存器</td><td><code>HCR_EL2.RW</code> 和 <code>SPSR_EL2.M[4]</code> 打架</td></tr>
 </table>
 </div>
 
 <p><strong>看 EL 就能分辨</strong>——這是裸機除錯的典型手法：症狀相同時，去找那個會分岔的欄位。</p>
+
+<div class="callout">
+<span class="lbl">怎麼讀 <code>ESR_EL1</code></span>
+<p><code>ESR</code> = Exception Syndrome Register，硬體用它告訴你「為什麼會有這個例外」。最有用的是 <strong>EC 欄位（bits[31:26]）</strong>，也就是例外的種類：</p>
+<pre style="margin:10px 0"><code>(gdb) p/x $ESR_EL1 &gt;&gt; 26
+
+0x25   Data Abort，同一層         <span style="opacity:.6">← 堆疊沒設那種（lab 的 step3）</span>
+0x00   Unknown                    <span style="opacity:.6">← 在 EL1 碰 EL2 暫存器（lab 的 step8）</span></code></pre>
+<p>實測兩者的完整值是 <code>0x96000040</code> 和 <code>0x2000000</code>。<code>0x25</code> 那筆還可以再看 <code>FAR_EL1</code>（Fault Address Register，出事的位址），實測是 <code>0xfffffffffffffff0</code>——正是 <code>sp - 16</code>。</p>
+<p><code>lab/m1</code> 的 <code>make step3</code> 和 <code>make step8</code> 都會印這兩個值。</p>
+</div>
 
 <h2><span class="num">3</span>先認識「特權等級」</h2>
 
@@ -262,14 +337,14 @@ $2 = 0                     <span style="opacity:.6">← 計數器一次都沒跑
     <text x="200" y="235" font-size="10.5" opacity=".65">M8 之後才會用到</text>
 
     <g stroke="currentColor" stroke-width="1.3" fill="none" opacity=".6">
-      <path d="M 470 210 L 500 210 L 500 110 L 470 110" />
-      <path d="M 476 104 L 470 110 L 476 116" />
+      <path d="M 470 220 L 500 220 L 500 162 L 470 162" />
+      <path d="M 476 156 L 470 162 L 476 168" />
       <path d="M 90 110 L 60 110 L 60 165 L 90 165" />
       <path d="M 84 159 L 90 165 L 84 171" />
     </g>
-    <text x="510" y="150" font-size="10.5" opacity=".7">出事時硬體</text>
-    <text x="510" y="166" font-size="10.5" opacity=".7">自動往上抬</text>
-    <text x="512" y="182" font-size="10.5" opacity=".7">（自動）</text>
+    <text x="510" y="186" font-size="10.5" opacity=".7">EL0 出事時</text>
+    <text x="510" y="202" font-size="10.5" opacity=".7">硬體自動</text>
+    <text x="510" y="218" font-size="10.5" opacity=".7">抬到 EL1</text>
 
     <text x="8" y="120" font-size="10.5" opacity=".7">往下只能</text>
     <text x="8" y="136" font-size="10.5" opacity=".7">自己走</text>
@@ -363,9 +438,11 @@ msr  hcr_el2, x9        通用暫存器 → 系統暫存器（<b>M</b>ove to <b>
 eret 之後   pc = 0x40000020（el1_entry）   EL = <b>2</b>   PSTATE.IL = <b>1</b>
 再一步      pc = 0x200</code></pre>
 
+<p>（<code>SPSR_EL2.M[4]</code> 是我們填的 <code>0x3c5</code> 裡的 bit 4，它也在講「降下去之後用 64 還是 32 位元」——整張位元圖在下一段。）</p>
+
 <p><code>HCR_EL2.RW = 0</code>（EL1 是 32 位元）跟 <code>SPSR_EL2.M[4] = 0</code>（要求 64 位元）<strong>互相矛盾</strong>，這叫 <strong>illegal exception return</strong>（非法的例外返回）。硬體的處理方式是：<strong>不換層</strong>、把 <code>PSTATE</code> 的 <code>IL</code> 位元（bit 20，Illegal Execution state）設起來，然後下一次取指令就直接 trap 到例外向量。</p>
 
-<p>所以症狀跟「忘記先判斷 EL」很像（都是 <code>pc = 0x200</code>、<code>x10 = 0</code>），但成因完全不同：一個是在 EL1 誤碰 EL2 暫存器，一個是 <code>eret</code> 的兩個設定打架。<strong>A64 指令從頭到尾沒有被當成 A32 執行過。</strong></p>
+<p>所以症狀跟「忘記先判斷 EL」很像（都是 <code>pc = 0x200</code>、<code>sp = 0x0</code>），但成因完全不同：一個是在 EL1 誤碰 EL2 暫存器，一個是 <code>eret</code> 的兩個設定打架。<strong>A64 指令從頭到尾沒有被當成 A32 執行過。</strong></p>
 
 <p><strong><code>SPSR_EL2</code> 填 <code>0x3c5</code></strong>，拆開來看：</p>
 
@@ -474,9 +551,10 @@ eret 之後   pc = 0x40000020（el1_entry）   EL = <b>2</b>   PSTATE.IL = <b>1<
 <p>「無聲當機」聽起來像形容詞，但它有具體的位址。實測把那三行判斷刪掉之後：</p>
 
 <pre><code>p/x $pc   →  0x200      <span style="opacity:.6">不是我們的程式碼</span>
-p $x10    →  0          <span style="opacity:.6">計數器一次都沒跑到</span></code></pre>
+p/x $sp   →  0x0        <span style="opacity:.6">連 mov sp, x9 都還沒跑到</span>
+p ($cpsr &gt;&gt; 2) &amp; 3  →  1  <span style="opacity:.6">層級沒變過</span></code></pre>
 
-<p><code>0x200</code> 不是隨機的。例外向量表的基底位址存在 <code>VBAR_EL1</code>，重置後是 <code>0</code>；而「同一層、同步例外」的入口在基底 + <code>0x200</code>。<strong>CPU 是規規矩矩地跳去處理例外了</strong>——只是那個位址上是記憶體垃圾，因為例外向量表要到 M3 才建。</p>
+<p><code>0x200</code> 不是隨機的。例外向量表的基底位址存在 <code>VBAR_EL1</code>，重置後是 <code>0</code>；而「同一層、同步例外」的入口在基底 + <code>0x200</code>。<strong>CPU 是規規矩矩地跳去處理例外了</strong>——只是那裡放的是 QEMU 的 device tree（見第 2 節），不是向量表，因為向量表要到 M3 才建。</p>
 
 <h2><span class="num">6</span>逐行拆解</h2>
 
@@ -493,7 +571,26 @@ p $x10    →  0          <span style="opacity:.6">計數器一次都沒跑到</
     msr     elr_el2, x9
     eret                            <span style="opacity:.6">出發</span>
 
-el1_entry:                          <span style="opacity:.6">兩條路在這裡會合，保證在 EL1</span></code></pre>
+el1_entry:                          <span style="opacity:.6">兩條路在這裡會合，保證在 EL1</span>
+    ldr     x9, =__stack_top        <span style="opacity:.6">🪜 給 C 一個堆疊（第 7 節）</span>
+    mov     sp, x9
+
+    ldr     x9, =__bss_start        <span style="opacity:.6">🧹 把 .bss 清成 0（第 8 節）</span>
+    ldr     x10, =__bss_end
+bss_zero:
+    cmp     x9, x10
+    b.hs    enter_c
+    stp     xzr, xzr, [x9], #16
+    b       bss_zero
+
+enter_c:
+    bl      kernel_main             <span style="opacity:.6">交棒</span>
+
+halt_loop:                          <span style="opacity:.6">萬一 C 回來了，停在這</span>
+    wfe
+    b       halt_loop</code></pre>
+
+<p>從 <code>el1_entry</code> 開始的部分自成一個主題——「怎麼把機器交給 C」——第 7、8 節專門講。這一節後面只補完前半段的細節。</p>
 
 <figure>
 <svg viewBox="0 0 700 450" role="img" aria-label="boot.S 的控制流：兩條路徑會合於 el1_entry">
@@ -553,16 +650,27 @@ el1_entry:                          <span style="opacity:.6">兩條路在這裡�
 <table>
 <tr><th>寫法</th><th>做什麼</th><th>範圍</th></tr>
 <tr><td><code>adr x9, label</code></td><td>取位址。<strong>用「現在的 PC 加一個位移」算出來</strong></td><td>±1 MB</td></tr>
-<tr><td><code>ldr x9, =label</code></td><td>取位址。編譯器把絕對位址存在附近，再讀出來</td><td>不限</td></tr>
+<tr><td><code>ldr x9, =label</code></td><td>取位址。組譯器把那個數字存在附近的<strong>字面池</strong>（literal pool），再讀出來</td><td>值不限，但字面池本身要在 ±1 MB 內</td></tr>
 <tr><td><code>ldr x9, [x10]</code></td><td>去 <code>x10</code> 指的位址<strong>讀一個值</strong></td><td>—</td></tr>
 </table>
 </div>
 
-<p>這裡用 <code>adr</code> 有一個實際好處：它算出來的是<strong>相對</strong>位址，所以整段程式碼被搬到記憶體別的地方也照樣正確。<code>ldr =</code> 存的是絕對位址，搬家就錯了。M5 開 MMU 把核心搬到高位址時，這個差別會變得很重要。</p>
+<p><strong>字面池</strong>就是組譯器在你的程式碼旁邊挖的一小塊地方，專門存放塞不進指令的常數。<code>make dump</code> 看得到，它就在 <code>halt_loop</code> 後面：</p>
 
-<p>反組譯可以看到它確實被算成了絕對位址：</p>
+<pre><code>40000058:  40010100  .word  0x40010100     <span style="opacity:.6">← __stack_top，ldr = 就是去讀這裡</span></code></pre>
 
-<pre><code>4000001c:  10000069   adr  x9, 40000028 &lt;el1_entry&gt;</code></pre>
+<p><code>adr</code> 的好處是它<strong>不需要字面池</strong>——位移直接編碼在指令裡。把連結基底從 <code>0x40000000</code> 改成 <code>0x50000000</code> 重連一次，兩者的差別一眼可見：</p>
+
+<pre><code>基底 0x40000000            基底 0x50000000
+4000001c: 10000069 adr     5000001c: <b>10000069</b> adr   <span style="opacity:.6">← 編碼完全相同</span>
+40000058: 40010100 .word   50000058: <b>50010100</b> .word <span style="opacity:.6">← 這個跟著搬家</span></code></pre>
+
+<p><code>adr</code> 的機器碼<strong>一個位元都沒變</strong>，因為它存的是「往前 12 個 byte」；<code>ldr =</code> 的字面則整個換了值。M5 開 MMU 把核心搬到高位址時，這個差別會變得很重要。</p>
+
+<div class="callout myth">
+<span class="lbl">objdump 會騙你</span>
+<p>上面那行 <code>adr x9, 40000028</code> 印的是絕對位址，很容易以為 <code>adr</code> 算的就是絕對位址。<strong>不是。</strong> 那是 objdump 幫你把「PC + 12」換算好給你看的，指令本身只有那個 12。<strong>要證明它是相對的，得換基底重連一次，不能只看單一次的反組譯。</strong></p>
+</div>
 
 <h3>為什麼 <code>CurrentEL</code> 要跟 4 比</h3>
 
@@ -577,19 +685,439 @@ EL2  →  0b1000  =  0x8</code></pre>
 
 <p>所以現在所有暫用都改成 <code>x9</code>／<code>x10</code>，把 <code>x0</code>–<code>x3</code> 原封不動留給後面的里程碑。</p>
 
-<h2><span class="num">7</span>實測數據</h2>
+<h2><span class="num">7</span>堆疊：誰在寫，寫到哪</h2>
+
+<p>到這裡為止全部是組合語言。要交棒給 C，得先給它兩樣東西：<strong>一個堆疊</strong>，和<strong>一塊歸零的記憶體</strong>。這一節講第一樣。</p>
+
+<h3>先講「堆疊」是什麼</h3>
+
+<p>CPU 裡的暫存器（register，可以直接運算的儲存格）只有 31 個。函式一多、變數一多就不夠用，放不下的東西要暫時擺到記憶體去。<strong>堆疊（stack）就是專門拿來擺這些東西的一塊記憶體</strong>。</p>
+
+<p>它有一個專屬暫存器 <code>SP</code>（stack pointer，堆疊指標）記著「目前用到哪裡」。AArch64 的堆疊<strong>往低位址長</strong>：要多用一點，就把 <code>SP</code> 減小。</p>
+
+<div class="callout">
+<span class="lbl">為什麼它非有不可</span>
+<p>因為<strong>沒人會替你準備</strong>。在 Linux 上跑的程式，堆疊是核心在載入時配好的；這裡我們<em>就是</em>那個核心，沒有更下層的人幫忙。重置之後 <code>SP</code> 實測是 <code>0x0</code>——不是「未定義」，是明確的零，而零不是一塊能用的記憶體。</p>
+</div>
+
+<h3>7.1　<code>bl</code> 不動堆疊，它動的是暫存器</h3>
+
+<p><code>bl</code>（branch with link，帶連結的跳躍）是呼叫函式的指令。它做兩件事：跳過去，並且<strong>把「回來要接哪裡」寫進 <code>x30</code></strong> 這個暫存器（又叫 LR，link register）。</p>
+
+<p>注意：寫進<strong>暫存器</strong>，不是寫進堆疊。單步跑一遍就看得到：</p>
+
+<pre><code>--- 停在 enter_c 的 bl，還沒執行 ---
+pc  = 0x40000048
+sp  = 0x40010100
+x30 = 0x0
+
+--- bl 執行完了 ---
+pc  = 0x40000094     <span style="opacity:.6">← 跳到 kernel_main 了</span>
+sp  = 0x40010100     <span style="opacity:.6">← 一個 byte 都沒動</span>
+x30 = 0x4000004c     <span style="opacity:.6">← 回程位址進了暫存器</span>
+
+--- kernel_main 第一條 stp 執行完了 ---
+pc  = 0x40000098
+sp  = 0x400100f0     <span style="opacity:.6">← 這時候才動，而且是被 C 自己動的</span></code></pre>
+
+<p>所以動堆疊的不是 <code>bl</code>，是<strong>被呼叫的函式自己</strong>。</p>
+
+<h3>7.2　它自己為什麼要動</h3>
+
+<p><code>x30</code> 只有一個。<code>kernel_main</code> 一旦要再呼叫別人，那次 <code>bl</code> 就會把自己的回程位址蓋掉。所以它得先把 <code>x30</code> 存到記憶體——<strong>那塊記憶體就是堆疊</strong>。</p>
+
+<p>兩個函式的反組譯擺在一起就很清楚。（<code>adrp</code> 是 <code>adr</code> 的大範圍版本——先算出目標所在的那個 4 KB 頁的開頭，再用下一條 <code>add</code> 補上頁內位移，兩條湊成 ±4 GB。這裡它在算 <code>boot_counter</code> 的位址。）</p>
+
+<div class="tbl">
+<table>
+<tr><th>bump（不呼叫別人）</th><th>kernel_main（會呼叫 bump）</th></tr>
+<tr><td><pre style="margin:0"><code>adrp x0, 40000000
+add  x0, x0, #0xf0
+ldr  x0, [x0]
+add  x1, x0, #0x1
+...
+ret</code></pre></td>
+<td><pre style="margin:0"><code>stp  x29, x30, [sp, #-16]!
+mov  x29, sp
+bl   40000070 &lt;bump&gt;
+b    4000009c</code></pre></td></tr>
+<tr><td>整段<strong>沒有一個 <code>sp</code></strong></td><td>第一條就把 <code>x30</code> 推上堆疊</td></tr>
+</table>
+</div>
+
+<h3>7.3　但「不呼叫別人就不用堆疊」是錯的</h3>
+
+<p>很容易從上面那張表歸納出「葉子函式（leaf function，不再呼叫別人的函式）不用堆疊」。<strong>實測是錯的。</strong> 本專案沒有加任何 <code>-O</code> 旗標，也就是 <code>-O0</code>（完全不最佳化），在這個設定下：</p>
+
+<pre><code>static unsigned long g;
+
+void leaf_none (void) { g++; }
+void leaf_small(void) { volatile unsigned long a=1,b=2; g=a+b; }
+void leaf_array(void) { volatile unsigned long v[64]; v[0]=1; g=v[0]; }
+void leaf_many (void) { volatile unsigned long a=1,b=2,c=3,d=4,e=5,
+                                               f=6,h=7,i=8,j=9,k=10;
+                        g=a+b+c+d+e+f+h+i+j+k; }</code></pre>
+
+<pre><code>$ aarch64-linux-gnu-gcc -ffreestanding -nostdlib -c leaf.c -o leaf.o
+$ aarch64-linux-gnu-objdump -d leaf.o
+
+&lt;leaf_none&gt;:                                  <span style="opacity:.6">整段沒有一個 sp</span>
+&lt;leaf_small&gt;:  d10043ff  sub  sp, sp, #0x10
+&lt;leaf_array&gt;:  d10803ff  sub  sp, sp, #0x200
+&lt;leaf_many&gt;:   d10143ff  sub  sp, sp, #0x50</code></pre>
+
+<p>四個都是葉子，三個動了 <code>sp</code>。</p>
+
+<div class="callout">
+<span class="lbl">這些數字跟著原始碼跑，不要背</span>
+<p><code>leaf_array</code> 那個 <code>0x200</code> 就是 64 × 8 bytes，剛剛好。把 <code>v[0]=1</code> 改成一個 <code>for</code> 迴圈填滿整個陣列，會變成 <code>0x210</code>。</p>
+<p>多出來的 16 <strong>不是</strong>全給了迴圈計數器——實測 <code>i</code> 只佔 4 個 byte（在 <code>[sp, #524]</code>，用的是 32 位元的 <code>str wzr</code>），陣列被推到 <code>sp + 8</code>，其餘是 16-byte 對齊的填補。<strong>「多了 16」和「16 是誰用掉的」是兩個問題</strong>，只看框架大小回答不了第二個，得去看反組譯裡的 <code>[sp, #...]</code>。</p>
+<p><strong>所以照著這份原始碼跑才會得到這些數字。</strong> 自己改一改再量，反而更能看出「需要多少記憶體」跟「函式裡寫了什麼」的關係。</p>
+</div>
+
+<p>真正的規則是：<strong>函式只要需要一塊記憶體，就會動堆疊</strong>。存 <code>x30</code> 是一種需要，放不進暫存器的區域變數是另一種。「葉子／非葉子」只是其中一個判準，不是全部。</p>
+
+<h3>7.4　我在這裡多寫了一個 <code>noinline</code>，然後拿掉了</h3>
+
+<p>寫這節的時候我在 <code>bump()</code> 上掛了 <code>__attribute__((noinline))</code>（不准把這個函式展開到呼叫端），理由聽起來很正當：<strong>不加的話，<code>-O2</code> 會把 <code>bump</code> 展開進 <code>kernel_main</code>，於是整個函式不再碰堆疊，這個示範就靜靜失效了。</strong>那是真的，量得到：</p>
+
+<div class="tbl">
+<table>
+<tr><th><code>-O2</code></th><th><code>kernel_main</code> 的第一條指令</th></tr>
+<tr><td>有 <code>noinline</code></td><td><code>stp x29, x30, [sp, #-16]!</code> 還是要堆疊</td></tr>
+<tr><td>無 <code>noinline</code></td><td><code>adrp x1, 40000000</code> 展開了，整段不碰 <code>sp</code></td></tr>
+</table>
+</div>
+
+<p><strong>但這個專案沒有加任何 <code>-O</code> 旗標，也就是 <code>-O0</code>。</strong> 在 <code>-O0</code> 下加不加 <code>noinline</code>，<code>bump</code> 和 <code>kernel_main</code> 的機器碼<strong>一個 byte 都不差</strong>。同一支變數 <code>boot_counter</code> 上的 <code>volatile</code> 也一樣，拿掉毫無變化。</p>
+
+<p>本專案的鐵則之一是：<strong>拿掉它，現在會壞嗎？不會，就不該現在寫。</strong> 兩個都不會，所以兩個都拿掉了。</p>
+
+<p>真到了要開 <code>-O2</code> 的那天，加回去的那個 commit 會自帶一個好理由——這正是 <code>git log</code> 當教材的價值。</p>
+
+<h3>7.5　把 <code>mov sp, x9</code> 拿掉會怎樣</h3>
+
+<p>這是最值得親手做一次的實驗。刪掉那一行，其他都不動：</p>
+
+<pre><code>停在 kernel_main 第一條指令
+SP = 0x0
+=&gt; 0x4000008c &lt;kernel_main&gt;:  stp  x29, x30, [sp, #-16]!
+
+（執行這一條）
+
+PC = 0x200                    <span style="opacity:.6">← 人不在 kernel_main 了</span>
+SP = 0x0
+=&gt; 0x200:  adr  x16, 0x60845   <span style="opacity:.6">← 這裡根本不是我們的程式</span>
+   0x204:  udf  #12336</code></pre>
+
+<p>發生了什麼：<code>SP</code> 是 0，<code>[sp, #-16]</code> 算出來是 <code>0xffff_ffff_ffff_fff0</code>，那裡沒有記憶體 → 資料中止（data abort）。<code>VBAR_EL1</code> 重置後是 0，同層例外的入口在 base + <code>0x200</code>，所以 CPU 跳到 <code>0x200</code>——那裡放的是 QEMU 的 device tree，不是向量表（第 2 節）。</p>
+
+<p>這正好接回第 2 節實驗 2 的那個 <code>0x200</code>：<strong>還沒裝例外處理器的時候，所有錯誤都是無聲的</strong>。程式不會告訴你「堆疊沒設」，它只是消失。</p>
+
+<h3>7.6　堆疊爆掉也一樣無聲</h3>
+
+<p>堆疊只有 64 KB，而且<strong>沒有任何東西守著它的底部</strong>。把 <code>start.c</code> 換成這一份（放到別的地方編，不要動 repo）：</p>
+
+<pre><code>static unsigned long boot_counter;
+
+static unsigned long deep(unsigned long n)
+{
+    volatile unsigned long pad[8];   <span style="opacity:.6">每層吃掉 112 bytes</span>
+    pad[0] = n;
+    if (n == 0) return 0;
+    return pad[0] + deep(n - 1);
+}
+
+void kernel_main(void)
+{
+    boot_counter = deep(100000);     <span style="opacity:.6">64 KB 只夠約 585 層</span>
+    while (1) { }
+}</code></pre>
+
+<p>多了一個函式，所有位址都往後移了，所以下面的數字跟前面幾節<strong>不是同一個 build</strong>：</p>
+
+<pre><code>這一版的配置：
+  .text  ：0x40000000 .. 0x4000013f
+  堆疊   ：0x40000150 .. 0x40010150（64 KB）
+
+不用 -S，讓它自由跑三秒再接上 gdb：
+
+SP = 0x40000070          <span style="opacity:.6">← 已經在堆疊底部「以下」，人在 .text 裡面</span>
+PC = 0x200               <span style="opacity:.6">← 又是這個死路</span></code></pre>
+
+<p>再看被踩到的地方——<code>deep</code> 這個函式的第一條指令：</p>
+
+<pre><code>檔案裡原本是：
+  40000070 &lt;deep&gt;:  a9b97bfd   stp  x29, x30, [sp, #-112]!
+
+跑三秒後記憶體裡變成：
+  0x40000070 &lt;deep&gt;:  .inst 0x400000e0 ; undefined</code></pre>
+
+<p><code>0x400000e0</code> 是一個<strong>回程位址</strong>。堆疊長過頭，把自己的程式碼吃掉了，然後 CPU 去執行那個被改寫的位置，於是掉進 <code>0x200</code>。</p>
+
+<figure>
+<svg viewBox="0 0 700 330" role="img" aria-label="記憶體配置：.text 在下、.bss 在中、堆疊由上往下長">
+  <defs><marker id="sd" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+    <path d="M0,0 L7,3.2 L0,6.4" fill="none" stroke="currentColor" stroke-width="1.4"/></marker></defs>
+  <g font-family="ui-monospace,monospace" font-size="11.5" fill="currentColor">
+    <rect x="200" y="20" width="300" height="120" fill="var(--kern)" opacity=".14"/>
+    <rect x="200" y="20" width="300" height="120" fill="none" stroke="var(--kern)" stroke-width="1.6"/>
+    <text x="350" y="70" text-anchor="middle" font-size="13">.stack　64 KB</text>
+    <text x="350" y="90" text-anchor="middle" font-size="10.5" opacity=".7">沒有任何東西守著它的底部</text>
+    <line x1="350" y1="30" x2="350" y2="130" stroke="var(--kern)" stroke-width="2" marker-end="url(#sd)"/>
+    <text x="365" y="118" font-size="10.5" opacity=".8">往下長</text>
+
+    <rect x="200" y="150" width="300" height="40" fill="var(--ram)" opacity=".18"/>
+    <rect x="200" y="150" width="300" height="40" fill="none" stroke="var(--ram)" stroke-width="1.6"/>
+    <text x="350" y="168" text-anchor="middle" font-size="12.5">.bss　16 bytes</text>
+    <text x="350" y="183" text-anchor="middle" font-size="10.5" opacity=".7">boot_counter，開機時被清成 0</text>
+
+    <rect x="200" y="190" width="300" height="14" fill="none" stroke="currentColor" stroke-width="1" opacity=".35" stroke-dasharray="3 2"/>
+    <text x="350" y="200" text-anchor="middle" font-size="9.5" opacity=".6">ALIGN(16) 的 8 bytes 空隙，清零迴圈碰不到</text>
+
+    <rect x="200" y="210" width="300" height="30" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".55"/>
+    <text x="350" y="229" text-anchor="middle" font-size="11.5" opacity=".7">.eh_frame　64 bytes（gcc 自動產生，沒人用到）</text>
+
+    <rect x="200" y="250" width="300" height="52" fill="var(--mmio)" opacity=".16"/>
+    <rect x="200" y="250" width="300" height="52" fill="none" stroke="var(--mmio)" stroke-width="1.6"/>
+    <text x="350" y="272" text-anchor="middle" font-size="12.5">.text　程式碼</text>
+    <text x="350" y="290" text-anchor="middle" font-size="10.5" opacity=".7">堆疊爆掉時，被吃掉的就是這裡</text>
+
+    <text x="192" y="26"  text-anchor="end" font-size="11">0x40010100</text>
+    <text x="192" y="146" text-anchor="end" font-size="11">0x40000100</text>
+    <text x="192" y="196" text-anchor="end" font-size="11">0x400000f0</text>
+    <text x="192" y="210" text-anchor="end" font-size="11">0x400000e8</text>
+    <text x="192" y="246" text-anchor="end" font-size="11">0x400000a8</text>
+    <text x="192" y="300" text-anchor="end" font-size="11">0x40000000</text>
+
+    <text x="512" y="26"  font-size="10.5" opacity=".8">__stack_top（SP 的起點）</text>
+    <text x="512" y="146" font-size="10.5" opacity=".8">__bss_end</text>
+    <text x="512" y="196" font-size="10.5" opacity=".8">__bss_start（nm 看到的）</text>
+    <text x="512" y="210" font-size="10.5" opacity=".8">.bss 區段起點（readelf 看到的）</text>
+    <text x="512" y="300" font-size="10.5" opacity=".8">_start</text>
+  </g>
+</svg>
+<figcaption><strong>正式版</strong>（<code>kernel/start.c</code>）的實測配置，不是上面那個加了 <code>deep()</code> 的版本。位址由下往上遞增，堆疊由上往下長——兩者中間沒有隔離牆，要等 M5 開了 MMU 才做得出來</figcaption>
+</figure>
+
+<h3>7.7　這裡為什麼改用 <code>ldr =</code>，不用 <code>adr</code></h3>
+
+<p>第 6 節說 <code>adr</code> 有個好處：搬家也對。但這一段裡三個都寫成 <code>ldr x9, =__stack_top</code>。看起來自相矛盾，實測之後理由很具體。</p>
+
+<p>先確認一件事：<strong>今天改成 <code>adr</code> 是編得過的</strong>。</p>
+
+<pre><code>_start      = 0x40000000
+__stack_top = 0x40010100      差 0x10100 ≈ 64 KB，在 adr 的 ±1 MB 之內
+
+$ 把三個 ldr = 全改成 adr，重新編譯
+(exit 0)                      <span style="opacity:.6">← 沒事</span></code></pre>
+
+<p>但把 <code>STACK_SIZE</code> 從 <code>64K</code> 改成 <code>4M</code>，同一份程式碼就爆了：</p>
+
+<pre><code>(.text.boot+0x28): relocation truncated to fit:
+    R_AARCH64_ADR_PREL_LO21 against symbol `__stack_top'</code></pre>
+
+<p><code>ADR_PREL_LO21</code> 就是「PC 相對、21 位元」——21 位元帶正負號正好是 ±1 MB。堆疊放大到 4 MB，位移塞不進那 21 個位元，連結器只好放棄。</p>
+
+<div class="callout myth">
+<span class="lbl">「那 <code>ldr =</code> 就沒有距離限制囉？」</span>
+<p>也有，而且同樣是 ±1 MB——只是量的東西不一樣。</p>
+<pre style="margin:10px 0"><code>ldr x9, =0x123456789abcdef0
+.space 0x80000    (512 KB)   → 編得過
+.space 0x200000   (2 MB)     → Error: pc-relative load offset out of range</code></pre>
+<p><code>ldr =</code> 量的是<strong>指令到字面池的距離</strong>，而字面池是組譯器放在你程式碼旁邊的，<strong>跟著程式碼走</strong>；<code>adr</code> 量的是<strong>指令到那個符號的距離</strong>，符號在哪由連結器腳本決定。</p>
+</div>
+
+<p>所以真正的判準不是「誰的範圍大」，是<strong>「這個距離是誰在控制」</strong>：</p>
+
+<div class="tbl">
+<table>
+<tr><th>目標</th><th>距離由誰決定</th><th>該用</th></tr>
+<tr><td><code>el1_entry</code></td><td>同一個檔案裡隔幾條指令，我自己控制</td><td><code>adr</code></td></tr>
+<tr><td><code>__stack_top</code></td><td>連結器腳本，改一個數字就可能飛出去</td><td><code>ldr =</code></td></tr>
+</table>
+</div>
+
+<p><strong>會因為改設定而壞掉的寫法，不該用在會被改的東西上。</strong> 好消息是它壞得很大聲——編譯直接失敗，不是跑起來才莫名其妙。</p>
+
+<h2><span class="num">8</span><code>.bss</code>：那些零是誰給的</h2>
+
+<p>C 語言有一條保證：<strong>沒有寫初始值的全域變數，讀出來一定是 0</strong>。</p>
+
+<pre><code>static unsigned long boot_counter;   /* 沒給值 */</code></pre>
+
+<p>在 Linux 上這條保證是核心兌現的。這裡沒有核心——<strong>我們就是</strong>。所以要自己把它變成真的。</p>
+
+<h3>8.1　<code>.bss</code> 是「只記大小，不存內容」的區段</h3>
+
+<p>編譯器把所有沒給初始值的全域變數放進一個叫 <code>.bss</code> 的區段（section，執行檔裡的一塊分類區域）。它的型別是 <strong>NOBITS</strong>，字面意思就是「沒有位元組」——執行檔裡<strong>只記著它要多大、放在哪，不存任何內容</strong>。</p>
+
+<p>因為零是可以推算的，何必存一堆零進檔案？實測就是這樣：</p>
+
+<pre><code>$ readelf -lS build/kernel.elf
+
+  [ 1] .text     PROGBITS   0x40000000       <span style="opacity:.6">← 有內容，檔案裡真的存了</span>
+  [ 2] .eh_frame PROGBITS   0x400000a8       <span style="opacity:.6">← 有內容（64 bytes，到 0x400000e8）</span>
+  [ 3] .bss      NOBITS     0x400000e8       <span style="opacity:.6">← 沒內容</span>
+  [ 4] .stack    NOBITS     0x40000100       <span style="opacity:.6">← 沒內容</span>
+
+  LOAD   FileSiz 0xe8      MemSiz 0x10100
+         <span style="opacity:.6">檔案裡 232 bytes　　記憶體要 65792 bytes</span></code></pre>
+
+<div class="callout">
+<span class="lbl">注意：<code>.bss</code> 的區段位址不等於 <code>__bss_start</code></span>
+<p>區段從 <code>0x400000e8</code> 開始，但 <code>__bss_start</code> 是 <code>0x400000f0</code> —— 差 8 個 byte。那是連結器腳本裡 <code>.bss { }</code> 開頭那個 <code>. = ALIGN(16);</code> 推出來的，<strong>清零迴圈永遠不會碰到那 8 個 byte</strong>（它從 <code>__bss_start</code> 起跑）。</p>
+<p>沒關係，因為那裡不住任何變數。但這是「區段」和「符號」兩件事的好例子：<code>readelf</code> 看區段，<code>nm</code> 看符號，兩者不一定重合。</p>
+</div>
+
+<p>檔案裡 232 bytes，記憶體要 65792 bytes，<strong>差 65560 bytes</strong>。拆開來就是 <code>.stack</code> 的 65536、<code>.bss</code> 的 16，再加 8 bytes 的對齊填補（<code>.eh_frame</code> 結束於 <code>0x400000e8</code>，<code>.bss</code> 起於 <code>0x400000f0</code>）——通通是「說好了要有，但沒存」的空間。</p>
+
+<div class="callout myth">
+<span class="lbl">順手拆掉一個</span>
+<p>連結器腳本有個 <code>NOLOAD</code> 關鍵字，看起來就是幹這件事的，很容易想加在 <code>.bss</code> 上。<strong>實測加了跟沒加，產出的映像完全一樣</strong>——把符號表 strip 掉之後 md5 相同（<code>20f924b6eb33…</code>）。</p>
+<p>原因是 <code>.bss</code> 的輸入區段<em>本來就是</em> NOBITS，<code>.stack</code> 更是沒有任何內容可載。<code>NOLOAD</code> 在這裡沒有任何事情可做。</p>
+<p>（唯一的 6 個 byte 差異是 gcc 暫存 <code>.o</code> 的隨機檔名 <code>ccGWRvg.o</code> vs <code>cc3aNwQx.o</code>，跟 <code>NOLOAD</code> 無關。差點就把它當成證據了。）</p>
+</div>
+
+<h3>8.2　清零迴圈逐行</h3>
+
+<pre><code>    ldr     x9,  =__bss_start       <span style="opacity:.6">從哪開始</span>
+    ldr     x10, =__bss_end         <span style="opacity:.6">到哪結束</span>
+bss_zero:
+    cmp     x9, x10                 <span style="opacity:.6">到了嗎？</span>
+    b.hs    enter_c                 <span style="opacity:.6">到了就走</span>
+    stp     xzr, xzr, [x9], #16     <span style="opacity:.6">寫 16 個 0，指標往前 16</span>
+    b       bss_zero</code></pre>
+
+<p><code>xzr</code> 是零暫存器（zero register）——讀它永遠得到 0。<code>stp</code> 是 store pair，一次存兩個 64 位元暫存器，也就是<strong>一圈清 16 bytes</strong>。</p>
+
+<h4>後綴的 <code>#16</code>：post-index</h4>
+
+<p><code>[x9], #16</code> 和 <code>[x9, #16]!</code> 長得像，動作順序相反。實測（兩個都從 <code>0x1000</code> 出發）：</p>
+
+<div class="tbl">
+<table>
+<tr><th>寫法</th><th>順序</th><th>寫到哪</th><th>結束時暫存器</th></tr>
+<tr><td><code>stp xzr, xzr, [x9], #16</code><br>post-index（後遞增）</td><td>先寫，再加</td><td><code>0x1000</code></td><td><code>x9 = 0x1010</code></td></tr>
+<tr><td><code>stp xzr, xzr, [x10, #-16]!</code><br>pre-index（前遞減）</td><td>先減，再寫</td><td><code>0xff0</code></td><td><code>x10 = 0xff0</code></td></tr>
+</table>
+</div>
+
+<p>清 <code>.bss</code> 是<strong>由低往高掃</strong>，所以要 post-index：第一圈就得寫在 <code>__bss_start</code> 本身，不能先跳過。</p>
+
+<p>而 <code>kernel_main</code> 的 <code>stp x29, x30, [sp, #-16]!</code> 是 pre-index：堆疊往低長，<code>SP</code> 現在指的位置是<strong>已經用掉的</strong>，必須先退再寫。<strong>同一個指令，兩種用途，差一個驚嘆號。</strong></p>
+
+<h4><code>b.hs</code>：位址比大小要用無號</h4>
+
+<p><code>b.hs</code>（higher or same）是<strong>無號</strong>比較，跟它對應的有號版本是 <code>b.ge</code>。今天兩個都對，因為位址是 <code>0x4000_xxxx</code>，最高位元是 0，有號無號沒差。</p>
+
+<p>但 M5 開了 MMU 之後核心會搬到 <code>0xffff_...</code>，最高位元變成 1。同一組比較，兩種判斷給出相反答案：</p>
+
+<pre><code>x11 = 0xffff000000000000      <span style="opacity:.6">（M5 之後的核心位址長這樣）</span>
+x12 = 0x1000
+
+無號 hs 判斷 x11 &gt;= x12  →  1   ✅ 對，它是個超大的位址
+有號 ge 判斷 x11 &gt;= x12  →  0   ❌ 錯，被當成負數了</code></pre>
+
+<p><strong>位址沒有負數</strong>。比位址一律用無號，這不是為了將來，是本來就該這樣。</p>
+
+<h3>8.3　兩個 <code>ALIGN(16)</code>，和一個更兇的坑</h3>
+
+<p>連結器腳本裡的 <code>.bss</code> 長這樣，四行裡有三行值得解釋：</p>
+
+<pre><code>.bss : {
+    . = ALIGN(16);
+    __bss_start = .;        <span style="opacity:.6">← 符號在大括號「裡面」，這很重要</span>
+    *(.bss .bss.*)
+    *(COMMON)
+    . = ALIGN(16);
+    __bss_end = .;
+}</code></pre>
+
+<h4>對齊：不然最後一圈會寫出界</h4>
+
+<p>迴圈一次寫 16 bytes，所以區域大小<strong>必須是 16 的倍數</strong>。要重現「不是倍數」的情況有個陷阱：<strong>1 byte 的變數必須放在另一個 <code>.c</code> 檔</strong>。放在 <code>start.c</code> 裡的話，gcc 自己就會把那個 <code>.o</code> 的 <code>.bss</code> 補到 16，大小根本變不成奇數，實驗會安靜地失效。</p>
+
+<p>用的 <code>extra.c</code> 長這樣（位址會跟著這個檔的內容變，所以要照抄才對得上）：</p>
+
+<pre><code>static unsigned char odd_byte;
+unsigned char peek(void);
+unsigned char peek(void) { return odd_byte; }</code></pre>
+
+<p>再把 <code>.bss</code> 後面那個 <code>ALIGN(16)</code> 拿掉：</p>
+
+<div class="tbl">
+<table>
+<tr><th></th><th><code>__bss_start</code></th><th><code>__bss_end</code></th><th>區域大小</th></tr>
+<tr><td>有 <code>ALIGN(16)</code></td><td><code>0x40000110</code></td><td><code>0x40000120</code></td><td>16 ✅</td></tr>
+<tr><td>沒有</td><td><code>0x40000110</code></td><td><code>0x40000119</code></td><td>9 ❌</td></tr>
+</table>
+</div>
+
+<p>大小 9 的話：迴圈看到 <code>0x110 &lt; 0x119</code> 就寫下去，一寫就是 <code>0x110</code>–<code>0x11f</code>——<strong>界外 7 個 byte</strong>。開機前在界外的 <code>0x4000011c</code> 放一個標記：</p>
+
+<pre><code>開機前 0x4000011c = 0xa5a5a5a5
+清零後 0x4000011c = 0x0             <span style="opacity:.6">← 被抹掉了</span></code></pre>
+
+<h4>更兇的：符號寫在大括號外面</h4>
+
+<p>這個坑是原本沒發現的。<code>__bss_start = .;</code> 寫在 <code>.bss { }</code> <strong>外面</strong>也編得過，看起來一樣：</p>
+
+<pre><code>__bss_start = .;        <span style="opacity:.6">在外面</span>
+.bss : { ... }
+__bss_end = .;</code></pre>
+
+<p>問題是 <strong>orphan section</strong>（孤兒區段）——腳本裡沒提到、由 ld 自己決定放哪的區段。<code>.eh_frame</code> 就是一個（gcc 為了例外處理自動產生的，我們用不到，但它在）。<strong>ld 會把它塞進符號和 <code>.bss</code> 之間</strong>：</p>
+
+<pre><code>__bss_start = 0x400000a4      <span style="opacity:.6">← 落到 .eh_frame 前面去了</span>
+.eh_frame   = 0x400000a8      64 bytes
+
+開機前 0x400000a8 = 0x10
+清零後 0x400000a8 = 0x0       <span style="opacity:.6">← .eh_frame 被整段抹掉</span></code></pre>
+
+<p>把符號移進大括號裡面，<code>__bss_start</code> 就只能是 <code>.bss</code> 的開頭，<strong>ld 沒有地方可以塞東西進來</strong>。所有位址完全不變（<code>0x400000f0</code> / <code>0x40000100</code> / <code>0x40010100</code>），但不再靠運氣。</p>
+
+<div class="callout">
+<span class="lbl">為什麼這個比界外 7 bytes 嚴重</span>
+<p>界外 7 bytes 抹掉的是堆疊的空白區；orphan section 被抹掉的是<strong>一整個有內容的區段</strong>。而且今天之所以沒事，純粹是因為前面那個 <code>ALIGN(16)</code> 剛好把 <code>__bss_start</code> 推過了 <code>.eh_frame</code>——<strong>一個為了對齊而寫的東西，意外擋住了一個完全不相干的問題</strong>。這種「靠巧合正確」的程式碼，會在某天加了一個新區段之後突然壞掉。</p>
+</div>
+
+<h3>8.4　證明它真的有清（一個會失敗的實驗）</h3>
+
+<p>光看 <code>boot_counter</code> 是 0 不算證據——它本來就可能是 0。<strong>要先把它弄髒</strong>，實驗才有可能失敗，結果才有意義。</p>
+
+<p>QEMU 的 <code>-device loader</code> 可以在開機前直接往記憶體寫值：</p>
+
+<pre><code>-device loader,addr=0x400000f0,data=0xcafe1234,data-len=4</code></pre>
+
+<div class="tbl">
+<table>
+<tr><th></th><th>怎麼弄髒</th><th>開機前</th><th>進 <code>kernel_main</code> 時</th></tr>
+<tr><td>正式版（有清零迴圈）</td><td><code>-device loader</code></td><td><code>0xcafe1234</code></td><td><code>0x0</code> ✅</td></tr>
+<tr><td>把迴圈整段刪掉</td><td>GDB（見下面）</td><td><code>0xdeadbeefcafe1234</code></td><td><code>0xdeadbeefcafe1234</code> ❌</td></tr>
+</table>
+</div>
+
+<p>（兩列用的是不同工具，因為 <code>-device loader</code> 一次寫不了 8 個 byte——原因見下面那個坑。換成同一個工具結果也一樣，我兩種組合都跑過。）</p>
+
+<p>兩邊答案不同，這才叫證明。</p>
+
+<div class="callout">
+<span class="lbl">踩到的坑：data-len 最多只能填 7</span>
+<p>直覺會寫 <code>data-len=8</code>（一個 64 位元的值）。QEMU 6.2 直接 assert 掛掉：</p>
+<pre style="margin:10px 0"><code>generic_loader_reset: Assertion `s->data_len &lt; sizeof(s->data)' failed.
+Aborted (core dumped)</code></pre>
+<p><code>s->data</code> 是 <code>uint64_t</code>，<code>sizeof</code> 是 8，而比較寫的是<strong>嚴格小於</strong>，所以上限是 7。看起來像 QEMU 的手滑。<code>data-len=4</code> 完全正常，寫 4 個 byte 就夠當髒值了。</p>
+<p>要一次弄髒 8 個 byte 的話，改用 GDB：<code>set *(unsigned long *)0x400000f0 = 0xdeadbeefcafe1234</code>。</p>
+</div>
+
+<h2><span class="num">9</span>實測數據</h2>
 
 <p>這一節是<strong>數值彙整</strong>，方便日後查；操作步驟在第 2 節。量於 binutils 2.38 / gcc 11.4.0 / QEMU 6.2.0 / gdb 12.1（Ubuntu 22.04）。</p>
 
 <div class="callout">
-<span class="lbl">這些 _EL2 的值是怎麼量出來的</span>
-<p>gdb 12.1 讀不到 <code>HCR_EL2</code>、<code>SPSR_EL2</code>、<code>VBAR_EL1</code> 這些系統暫存器（一律回 <code>void</code>）。下面的數值是寫一段只做 <code>mrs</code> 的暫時核心，把值搬進通用暫存器再讀出來的：</p>
-<pre style="margin:10px 0 0"><code>_start:
-    mrs     x11, hcr_el2
-    mrs     x12, spsr_el2
-halt:
-    b       halt</code></pre>
-<p>這個手法對任何 gdb 讀不到的系統暫存器都適用，後面的里程碑會一直用到。</p>
+<span class="lbl">怎麼量的</span>
+<p>下面的 <code>_EL2</code> 數值是 gdb 直接讀的：<code>p/x $HCR_EL2</code>、<code>p/x $SPSR_EL2</code>（大寫全名，見第 2 節）。<code>CurrentEL</code> 是 gdb 唯一讀不到的一顆，靠 <code>stepi</code> 執行 <code>_start</code> 第一條 <code>mrs x9, CurrentEL</code> 之後看 <code>x9</code>。</p>
 </div>
 
 <h3>兩種開機方式進來時的狀態</h3>
@@ -615,18 +1143,62 @@ $ qemu-system-aarch64 -M virt,virtualization=on ...
 
 <p>最後一列是重點。<strong>這個實驗被刻意設計成可能失敗</strong>——有降級和沒降級預測不同的答案，所以結果才有意義。</p>
 
-<p>降級之後 <code>$cpsr</code> 讀出來是 <code>0x3c5</code>，跟我們寫進 <code>SPSR_EL2</code> 的值一模一樣，也跟 QEMU 直接進 EL1 時的低位相同。</p>
+<p>進到 <code>kernel_main</code> 時，兩條路的 <code>$cpsr</code> 都是 <code>0x600003c5</code>。低 12 位 <code>0x3c5</code> 正是寫進 <code>SPSR_EL2</code> 的值；高位的 <code>0x6000_0000</code> 是條件旗標 NZCV，被清 <code>.bss</code> 那個迴圈最後一次 <code>cmp</code> 設成一樣了。</p>
 
-<h2><span class="num">8</span>被推翻的直覺</h2>
+<h3>記憶體配置</h3>
+
+<pre><code>0x40000000   .text        _start        <span style="opacity:.6">程式碼</span>
+0x400000a8   .eh_frame                  <span style="opacity:.6">64 bytes，gcc 自動產生，沒人用到</span>
+0x400000e8   .bss 區段起點               <span style="opacity:.6">readelf 看到的位置</span>
+0x400000f0                __bss_start   <span style="opacity:.6">boot_counter；ALIGN(16) 推出來的，差 8</span>
+0x40000100                __bss_end
+0x40010100   .stack 頂端   __stack_top   <span style="opacity:.6">SP 的起點，往下長 64 KB</span>
+
+LOAD  FileSiz 0xe8 (232)   MemSiz 0x10100 (65792)</code></pre>
+
+<p>檔案 232 bytes、記憶體 65792 bytes，差 65560——<code>.stack</code> 的 65536、<code>.bss</code> 的 16，加 8 bytes 對齊填補。</p>
+
+<h3>進到 <code>kernel_main</code> 時（兩條路都一樣）</h3>
+
+<pre><code>SP        = 0x400100f0     <span style="opacity:.6">已扣掉序言推的 16 bytes</span>
+EL        = 1
+boot_counter = 0x0         <span style="opacity:.6">開機前先寫 0xcafe1234 進去，還是被清成 0</span></code></pre>
+
+<h3><code>bl</code> 前後（單步）</h3>
+
+<pre><code>            pc           sp           x30
+bl 之前     0x40000048   0x40010100   0x0
+bl 之後     0x40000094   0x40010100   0x4000004c    <span style="opacity:.6">sp 完全沒動</span>
+stp 之後    0x40000098   0x400100f0                 <span style="opacity:.6">這才是動 sp 的人</span></code></pre>
+
+<h3>幾個對照組</h3>
+
+<div class="tbl">
+<table>
+<tr><th>改什麼</th><th>結果</th></tr>
+<tr><td><code>.bss</code>／<code>.stack</code> 加 <code>NOLOAD</code></td><td>strip 後 md5 完全相同 → 沒有作用</td></tr>
+<tr><td>拿掉後面的 <code>ALIGN(16)</code>，另開 <code>extra.c</code> 加 1 byte 變數</td><td><code>__bss_end = 0x40000119</code>，清零迴圈踩出界 7 bytes（界外標記 <code>0xa5a5a5a5</code> 被抹成 0）</td></tr>
+<tr><td><code>__bss_start</code> 移到 <code>.bss { }</code> 外面，並拿掉前面的 <code>ALIGN(16)</code></td><td><code>__bss_start = 0x400000a4</code>，落在 <code>.eh_frame</code> 前面 → <code>.eh_frame</code> 被整段清成 0</td></tr>
+<tr><td>三個 <code>ldr =</code> 改成 <code>adr</code></td><td>64K 堆疊編得過；改成 4M 堆疊 → <code>relocation truncated to fit</code></td></tr>
+<tr><td><code>-O0</code> 下加／不加 <code>noinline</code>、<code>volatile</code></td><td>指令完全相同 → 兩個都拿掉了</td></tr>
+<tr><td><code>-O2</code> 下拿掉 <code>noinline</code></td><td><code>kernel_main</code> 第一條變成 <code>adrp</code>，整段不碰 <code>sp</code></td></tr>
+<tr><td>連結基底 <code>0x40000000</code> → <code>0x50000000</code></td><td><code>adr</code> 編碼不變（<code>10000069</code>），<code>ldr =</code> 的字面從 <code>40010100</code> 變 <code>50010100</code></td></tr>
+<tr><td><code>ldr x9, =</code> 後面墊 2 MB</td><td><code>pc-relative load offset out of range</code> → <code>ldr =</code> 也有 ±1 MB</td></tr>
+<tr><td>拿掉 <code>mov sp, x9</code></td><td><code>SP = 0</code>，第一條 <code>stp</code> → <code>pc = 0x200</code></td></tr>
+<tr><td>遞迴到堆疊爆掉</td><td><code>SP = 0x40000070</code>（已在 <code>.text</code> 裡），<code>deep</code> 的第一條指令被回程位址蓋掉</td></tr>
+</table>
+</div>
+
+<h2><span class="num">10</span>被推翻的直覺</h2>
 
 <div class="callout myth">
 <span class="lbl">直覺 1</span>
 <p><strong>「QEMU 加上 <code>-smp 4</code>，四顆核心就會一起衝進來，所以要寫程式篩選 core 0」</strong></p>
 <p>錯。實測 <code>-smp 4</code> 讓它自由跑三秒之後：</p>
-<pre style="margin:10px 0"><code>CPU#0  [running]  停在 halt_loop     ← 只有這顆跑了
-CPU#1  [halted ]  停在 _start
-CPU#2  [halted ]  停在 _start
-CPU#3  [halted ]  停在 _start        ← 一條指令都沒執行</code></pre>
+<pre style="margin:10px 0"><code>* 1  (CPU#0 [running]) 0x400000a0 in kernel_main ()   ← 只有這顆跑了
+  2  (CPU#1 [halted ]) 0x40000000 in _start ()
+  3  (CPU#2 [halted ]) 0x40000000 in _start ()
+  4  (CPU#3 [halted ]) 0x40000000 in _start ()        ← 一條指令都沒執行</code></pre>
 <p>QEMU 的 virt 機器<strong>不會在開機時放出副核心</strong>。它們被關在「電源關閉」狀態，要等軟體用 PSCI（Power State Coordination Interface，電源狀態協調介面）主動叫醒才會動。</p>
 <p>所以核心篩選的程式碼在 QEMU 上<strong>根本不會被執行到</strong>，寫了也驗不了。這件事整包留到 M9 移植樹莓派時再做——那時四顆核心才是真的一起進來。</p>
 </div>
@@ -668,15 +1240,96 @@ $ pgrep -x qemu-system-aar
 <p>正確寫法：<code>pkill -x qemu-system-aar</code>（截斷後的名字），或用 <code>ss -ltnp</code> 從佔用的 port 反查 PID 再精確 kill。</p>
 </div>
 
-<h2><span class="num">9</span>精髓</h2>
+<div class="callout myth">
+<span class="lbl">直覺 4</span>
+<p><strong>「呼叫任何 C 函式都會往堆疊寫東西」</strong></p>
+<p>錯。<code>bl</code> 把回程位址寫進 <code>x30</code> 這個<strong>暫存器</strong>，堆疊一個 byte 都沒動：</p>
+<pre style="margin:10px 0"><code>bl 之前   sp = 0x40010100   x30 = 0x0
+bl 之後   sp = 0x40010100   x30 = 0x4000004c   ← sp 沒變</code></pre>
+<p>動堆疊的是<strong>被呼叫的函式自己</strong>。這件事我原本寫錯在註解裡，是實際單步跑出來才發現的。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 5</span>
+<p><strong>「那反過來說，不呼叫別人的葉子函式就不會用到堆疊」</strong></p>
+<p>也錯，而且是我在修上一條時<strong>順手寫下的第二個錯</strong>。本專案沒加 <code>-O</code>，也就是 <code>-O0</code>，實測：</p>
+<pre style="margin:10px 0"><code>leaf_small （兩個區域變數）  sub sp, sp, #0x10
+leaf_array （64 元素陣列）   sub sp, sp, #0x200
+leaf_many  （十個區域變數）  sub sp, sp, #0x50</code></pre>
+<p>三個都是葉子，三個都動 <code>sp</code>。真正的規則是<strong>「函式需不需要一塊記憶體」</strong>——存 <code>x30</code> 只是其中一種需要。</p>
+<p>這兩條連在一起的教訓：<strong>推翻一個錯誤直覺的時候，最容易立刻建立第二個。</strong></p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 6</span>
+<p><strong>「加 <code>noinline</code> 和 <code>volatile</code> 是為了保護這個示範，該留著」</strong></p>
+<p>理由本身是對的——<code>-O2</code> 確實會把 <code>bump</code> 展開掉，示範會靜靜失效。但<strong>本專案沒有加任何 <code>-O</code> 旗標</strong>，在 <code>-O0</code> 下：</p>
+<pre style="margin:10px 0"><code>有 noinline  vs  無 noinline   → 指令完全相同
+有 volatile  vs  無 volatile   → 指令完全相同</code></pre>
+<p>「拿掉它現在會壞嗎？」不會。兩個都拿掉了。<strong>「以後可能用得到」不是現在加它的理由</strong>——等真的開 <code>-O2</code>，那個 commit 自帶一個好理由。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 7</span>
+<p><strong>「<code>NOLOAD</code> 是讓 <code>.bss</code> 不佔檔案空間的關鍵字，該加」</strong></p>
+<p>實測加了沒加，strip 之後的映像 md5 一模一樣。<code>.bss</code> 的輸入區段本來就是 NOBITS，<code>.stack</code> 更沒有內容可載。</p>
+<p>差點被自己騙：<strong>不 strip 直接比 md5 會看到 6 個 byte 不同</strong>，看起來像「有差」。追下去才發現那是 gcc 暫存 <code>.o</code> 的隨機檔名（<code>ccGWRvg.o</code> vs <code>cc3aNwQx.o</code>）。<strong>比對前先想清楚「這個差異有沒有可能不是我改的東西造成的」。</strong></p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 8</span>
+<p><strong>「把堆疊放在 <code>.bss</code> 外面，是為了避免清零迴圈踩到它」</strong></p>
+<p>這個理由聽起來很合理，但站不住。實際把堆疊搬進 <code>.bss</code> 裡面試了——<strong>照樣跑</strong>。因為 <code>boot.S</code> 是<em>先設 SP、再清 .bss</em>，而清零迴圈本身完全不用堆疊，那時也還沒有任何東西被推上去。</p>
+<p>真正的理由只是<strong>效率</strong>：迴圈少走 64 KB。這是一個「理由是對的，但我把它說成了正確性問題」的例子。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 9</span>
+<p><strong>「QEMU 的 <code>-device loader</code> 寫不進記憶體，弄髒 <code>.bss</code> 只能靠 GDB」</strong></p>
+<p>可以寫，是我參數給錯。<code>data-len=8</code> 會讓 QEMU 6.2 直接 assert 掛掉：</p>
+<pre style="margin:10px 0"><code>generic_loader_reset: Assertion `s->data_len &lt; sizeof(s->data)' failed.</code></pre>
+<p><code>s->data</code> 是 <code>uint64_t</code>，比較寫的是嚴格小於，所以 <strong>上限是 7</strong>。<code>data-len=4</code> 完全正常。</p>
+<p><strong>工具掛掉不代表做不到</strong>——先看它為什麼掛。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 10</span>
+<p><strong>「gdb 讀不到 <code>HCR_EL2</code> 這類系統暫存器，要自己寫一段 <code>mrs</code> 才看得到」</strong></p>
+<p>這是我寫在教材裡的話，<strong>而且是錯的</strong>。<code>p/x $HCR_EL2</code> 直接就有答案。我當初打的是小寫 <code>$hcr_el2</code>，回 <code>void</code>，就下結論說「讀不到」。</p>
+<pre style="margin:10px 0"><code>$hcr_el2  → void      $HCR_EL2 → 0x80000000
+$VBAR_EL1 → void      $VBAR    → 0x0</code></pre>
+<p>而且我修正的時候<strong>又漏了第三種</strong>：用 <code>-M virt</code> 開機時 <code>$HCR_EL2</code> 也回 <code>void</code>，因為<strong>那台機器沒有 EL2</strong>——實測暫存器清單從 411 顆掉到 383 顆。</p>
+<p>連這句話都還不夠準。<strong>差額 28 是淨值</strong>：少了 29 顆 EL2 控制暫存器，卻多了一顆 <code>RVBAR_EL1</code>（QEMU 只在最高的那一層暴露 <code>RVBAR</code>）。而且 <code>-M virt</code> 下仍有 <code>ACTLR_EL2</code> 等四顆名字帶 <code>_EL2</code> 的暫存器讀得到。<strong>「淨增減」和「哪些東西進出」是兩個問題，減法只回答得了前者。</strong></p>
+<p>真的沒有的只有 <code>$CurrentEL</code> 一顆。<strong>回 <code>void</code> 有三種完全不同的原因</strong>：名字打錯、後綴給錯、或這台機器沒有那一層。<code>maint print remote-registers</code> 一查就知道是哪一種。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 11</span>
+<p><strong>「<code>ldr x9, =label</code> 沒有距離限制，<code>adr</code> 才有 ±1 MB」</strong></p>
+<p>兩個都有 ±1 MB，只是量的東西不同：</p>
+<pre style="margin:10px 0"><code>ldr x9, =0x123456789abcdef0
+.space 0x200000   → Error: pc-relative load offset out of range</code></pre>
+<p><code>adr</code> 量「指令到符號」，<code>ldr =</code> 量「指令到字面池」。字面池跟著程式碼走，符號由連結器決定——<strong>差別在誰控制那個距離，不在誰的範圍大</strong>。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 12</span>
+<p><strong>「<code>__bss_start = .;</code> 寫在 <code>.bss { }</code> 大括號外面或裡面都一樣」</strong></p>
+<p>寫外面，ld 可以把 orphan section 塞進符號和 <code>.bss</code> 之間。實測 <code>.eh_frame</code> 就落在那裡，開機時被清零迴圈<strong>整段抹掉</strong>。</p>
+<p>今天沒事是因為前面那個 <code>ALIGN(16)</code> 剛好把 <code>__bss_start</code> 推過了 <code>.eh_frame</code>——<strong>一個為了對齊寫的東西意外擋住了不相干的問題</strong>。移進大括號裡面，位址一個都沒變，但 ld 再也沒地方塞東西。</p>
+</div>
+
+<h2><span class="num">11</span>精髓</h2>
 
 <ol>
   <li><strong>權力往上是自動的，往下要自己走。</strong> 硬體只在出事時把你抬上去，從來不會主動把你放下來。降級是軟體的責任，而且要借用「返回」這個機制來完成。</li>
   <li><strong>先問狀態，再動作。</strong> 同一份程式碼要能在兩種平台跑，唯一的辦法是先問「我現在是什麼情況」。不問就做，在其中一種平台上必然出事。</li>
-  <li><strong>沒有例外處理器的時候，所有錯誤都是無聲的。</strong> 這也是 DAIF 要先全遮的原因——不是因為中斷有害，是因為現在沒有人接得住。</li>
+  <li><strong>沒有例外處理器的時候，所有錯誤都是無聲的。</strong> 這也是 DAIF 要先全遮的原因——不是因為中斷有害，是因為現在沒有人接得住。三種完全不同的錯（碰錯層的暫存器、堆疊沒設、堆疊爆掉）最後都落在同一個 <code>0x200</code>。</li>
+  <li><strong>C 的「保證」都是有人在兌現的。</strong> 有堆疊可用、全域變數是 0——這兩件事在 Linux 上是核心做的。這裡沒有核心，所以要自己補上這 12 行組合語言。<strong>語言的保證不是憑空的，是某一層軟體在維持的。</strong></li>
+  <li><strong>會失敗的實驗才叫實驗。</strong> 看到 <code>boot_counter == 0</code> 不能證明清零有效，因為它本來就可能是 0。<strong>先弄髒</strong>，答案才有兩種可能，結果才有意義。</li>
 </ol>
 
-<h2><span class="num">10</span>一頁式小抄</h2>
+<h2><span class="num">12</span>一頁式小抄</h2>
 
 <div class="cheat">
 <h3>三個暫存器</h3>
@@ -695,17 +1348,57 @@ SPSR bits[9:6]               1111 = DAIF 全遮
 HCR_EL2 bit31 (RW)           1 = EL1 用 AArch64</code></pre>
 
 <h3>GDB 速查</h3>
-<pre><code>p/x $cpsr                看處理器狀態
+<pre><code>p/x $cpsr                看處理器狀態（PSTATE，名字是歷史包袱）
 p ($cpsr &gt;&gt; 2) &amp; 3       取出 EL 編號
-info threads             確認幾顆核心在跑</code></pre>
+info threads             確認幾顆核心在跑
+
+p/x $HCR_EL2             系統暫存器：一律大寫全名
+p/x $VBAR   $SCTLR       但 EL1 這兩顆不帶 _EL1
+p/x $TTBR0_EL1           其他的又要帶，記不起來就查：
+maint print remote-registers     -M virt 383 顆／virtualization=on 411 顆
+                         （淨 +28 = 多 29 顆 EL2 控制暫存器、少 1 顆 RVBAR_EL1）
+
+回 void 的三種原因：小寫、後綴給錯、這台機器沒有那一層
+$CurrentEL               ← 唯一真的沒有，只能靠 mrs</code></pre>
 
 <h3>兩種開機方式</h3>
 <pre><code>qemu-system-aarch64 -M virt ...                     進來就 EL1
 qemu-system-aarch64 -M virt,virtualization=on ...   進來是 EL2</code></pre>
+
+<h3>交棒給 C 的三件事</h3>
+<div class="tbl">
+<table>
+<tr><td>層級</td><td>降到 EL1</td><td><code>eret</code></td></tr>
+<tr><td>堆疊</td><td><code>SP = __stack_top</code></td><td>不設的話 <code>SP = 0</code>，第一次 push 就死</td></tr>
+<tr><td>零</td><td>把 <code>.bss</code> 掃成 0</td><td>不清的話全域變數是開機殘值</td></tr>
+</table>
+</div>
+
+<h3>指令與符號</h3>
+<pre><code>bl label            跳過去，回程位址寫進 x30（不動堆疊）
+stp a, b, [x9], #16 先寫 x9，x9 再 +16   post-index（清 .bss 用）
+stp a, b, [sp,#-16]! sp 先 -16，再寫      pre-index（push 用）
+xzr                 零暫存器，讀出來永遠是 0
+b.hs / b.cs         無號的「大於等於」，比位址要用這個
+adr  x9, label      PC 相對，範圍只有 ±1 MB
+ldr  x9, =label     經字面池取位址，字面池也要在 ±1 MB 內
+                    （連結器決定位置的符號用這個）</code></pre>
+
+<h3>記憶體</h3>
+<pre><code>0x40000000  .text
+0x400000e8  .bss 區段起點          readelf 看到的
+0x400000f0          __bss_start   nm 看到的，差 8（ALIGN 16）
+0x40000100          __bss_end
+0x40010100  .stack  __stack_top   ← SP 起點，往下長 64K</code></pre>
+
+<h3>弄髒記憶體來驗證</h3>
+<pre><code>-device loader,addr=0x400000f0,data=0xcafe1234,data-len=4
+                                  <span style="opacity:.6">data-len 上限是 7，填 8 會讓 QEMU assert</span>
+(gdb) set *(unsigned long *)0x400000f0 = 0xdeadbeefcafe1234</code></pre>
 </div>
 
 <footer>
 armos · 里程碑 M1 · 開發平台 QEMU virt，移植目標 Raspberry Pi 4（BCM2711）<br>
-程式碼：<code>kernel/boot.S</code>
+程式碼：<code>kernel/boot.S</code>、<code>kernel/start.c</code>、<code>linker/kernel-qemu.ld</code>
 </footer>
 </div>
