@@ -131,12 +131,17 @@ $2 = 2
 |---|---|---|---|
 | 1 | `linker/kernel-qemu.ld` 的 `0x40000000` → `0x41000000` | `make && make dump` | `_start` 跟著搬家。**不需要 `make clean`**，因為 Makefile 把 linker script 列進了相依項 |
 | 2 | `kernel/boot.S` 的 `.text.boot` 拼錯成 `.txet.boot` | `make clean && make` | **零警告、零錯誤，而且照樣開得起來** |
-| 3 | 拿掉 Makefile 的 `-Wl,--build-id=none` | `make clean && make dump` | entry point 變成 `0x40000024` |
-| 4 | Makefile 的 `WARN` 加上 `-g` | `make clean && make debug` | 斷點從 `0x40000030` 跑回 `0x4000002c`，第一次停時 `$1 = 0` |
+| 3 | 拿掉 Makefile 的 `-Wl,--build-id=none` | `make clean && make dump` | entry point 從 `0x40000000` 變成 `0x40000028` —— 連結器把一個 `.note.gnu.build-id` 塞到最前面，把 `_start` 推走了 |
+| 4 | Makefile 的 `WARN` 加上 `-g` | `make clean && make debug` | 斷點位址**不變**（都是 `0x4000009c`），但訊息多了 `file kernel/start.c, line 23`，而且 `print boot_counter` 不用再自己 cast 型別 |
 | 5 | 把 `boot.S` 從 `mov x9, #(1 << 31)` 到 `eret` 整段刪掉 | `make clean && make debug-el2` | 核心照樣跑，但 `p ($cpsr >> 2) & 3` 是 **2** —— 卡在 EL2 沒降下來 |
 
 實驗 2 是這個里程碑最重要的一課：**建置成功不等於做對了**。linker script 對
 section 名稱是純字串比對，打錯不會有任何錯誤訊息。
+
+實驗 4 值得注意的是**它沒有改變什麼**。`-g` 只是多塞六個 `.debug_*` 區段
+（檔案 67200 → 68688 bytes），一條指令都沒動，所以 GDB 跳過函式序言的位置也不會變。
+它讓 GDB 看得懂型別 —— 這就是為什麼沒有 `-g` 時，`make debug` 得寫成
+`print *(unsigned long *)&boot_counter` 而不能只寫 `print boot_counter`。
 
 每個實驗的原理與完整實測數據，見 `docs/guide/m0-build-and-boot.html` 第 7 節
 「被推翻的直覺」。

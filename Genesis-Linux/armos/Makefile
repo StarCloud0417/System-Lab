@@ -17,7 +17,7 @@ MACHINE_EL2 := virt,virtualization=on
 GDB     := gdb-multiarch
 
 # 大寫 .S 才會過 C 前處理器（小寫 .s 不會）
-SRC := kernel/boot.S
+SRC := kernel/boot.S kernel/start.c
 LD  := linker/kernel-qemu.ld
 
 # 每個旗標對應一個「拿掉就會出現」的失敗：
@@ -56,7 +56,8 @@ qemu: build/kernel.elf
 qemu-el2: build/kernel.elf
 	$(QEMU) -M $(MACHINE_EL2) -cpu cortex-a72 -nographic -kernel $<
 
-# 唯一能證明 CPU 真的在執行的方法：-S 停在第一條指令，-s 開 GDB port 1234。
+# 停在 kernel_main，一次確認三件事：堆疊有設、已在 EL1、.bss 被清成 0。
+# 沒有 -g 所以 GDB 不知道全域變數的型別，要自己 cast。
 # 序列埠寫檔而不用 -nographic，否則會跟前景的 GDB 搶同一個終端機。
 debug: build/kernel.elf
 	@if ss -ltn 2>/dev/null | grep -q ':1234 '; then \
@@ -69,12 +70,14 @@ debug: build/kernel.elf
 	qemu_pid=$$!; \
 	$(GDB) -q $< \
 	    -ex 'target remote :1234' \
-	    -ex 'break halt_loop' \
-	    -ex 'continue' -ex 'print $$x10' \
-	    -ex 'continue' -ex 'print $$x10'; \
+	    -ex 'break kernel_main' \
+	    -ex 'continue' \
+	    -ex 'printf "SP        = "' -ex 'print/x $$sp' \
+	    -ex 'printf "EL        = "' -ex 'print ($$cpsr >> 2) & 3' \
+	    -ex 'printf "bss 清了嗎 = "' -ex 'print *(unsigned long *)&boot_counter'; \
 	kill $$qemu_pid 2>/dev/null || true
 
-# 同 debug，但在 EL2 交接。兩者印出的 x10 應該一模一樣 —— 那正是降級有效的證明。
+# 同 debug，但在 EL2 交接。兩者印出的三個值應該一模一樣 —— 那正是降級有效的證明。
 debug-el2: build/kernel.elf
 	@$(MAKE) --no-print-directory debug MACHINE='$(MACHINE_EL2)'
 
