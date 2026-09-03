@@ -180,6 +180,7 @@ build/          建置產物（不進版控，可由原始碼完全重建）
 | 位置 | 回答什麼 |
 |---|---|
 | `git log` | **結果**：這個 commit 做了什麼、為什麼這樣選 |
+| `docs/guide/00-arm-map.html` | **全局**：一顆 ARM64 從通電到跑起 OS 的整張地圖，標出每一格「我們走到哪了」。**建議先讀這份** |
 | `docs/guide/` | **原理**：為什麼會這樣運作，附實測數據與圖解。目前有 [M0](docs/guide/m0-build-and-boot.html)、[M1](docs/guide/m1-boot-flow.html) |
 | `lab/` | **怎麼跑**：可執行的階梯，一個 `make` 指令跑一階。目前有 [M1](lab/m1/README.md) |
 

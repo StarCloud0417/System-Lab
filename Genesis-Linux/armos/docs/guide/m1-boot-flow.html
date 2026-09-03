@@ -64,6 +64,10 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
   <p class="sub">M0 讓 CPU 跑起來了。M1 要把它整理成一個乾淨的已知狀態——固定的層級、一個堆疊、一塊歸零的記憶體——才能交給 C 語言</p>
 </header>
 
+<p style="margin-top:22px;font-size:.9rem;color:var(--muted)">
+不確定這個里程碑在整張圖的哪個位置？先看 <a href="00-arm-map.html">ARM64 全局地圖</a>。
+</p>
+
 <h2><span class="num">1</span>要解決什麼問題</h2>
 
 <p>M0 結束時，核心停在一個遞增暫存器的迴圈裡。它會動，但機器的狀態是<strong>韌體給什麼就是什麼</strong>——我們從來沒問過現在是什麼狀況。</p>
