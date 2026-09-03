@@ -14,7 +14,7 @@
 | 里程碑 | 內容 | 狀態 |
 |---|---|---|
 | M0 | 環境建置與最小可開機映像 | **完成** |
-| M1 | 開機流程：核心篩選、EL 降級、堆疊與 BSS | 進行中 |
+| M1 | 開機流程：EL 降級、堆疊與 BSS | **完成** |
 | M2 | PL011 UART 驅動與 printf | |
 | M3 | 例外向量表與同步例外處理 | |
 | M4 | GICv2 中斷控制器與 Generic Timer | |
@@ -22,9 +22,13 @@
 | M6 | 實體記憶體管理（bitmap → 夥伴系統） | |
 | M7 | 行程與 Context Switch | |
 | M8 | User Mode 與 System Call | |
-| M9 | 移植到 Raspberry Pi 4 | |
+| M9 | 移植到 Raspberry Pi 4（含 `MPIDR_EL1` 核心篩選）| |
 | M10 | SMP 基礎機制（選配） | |
 | M11 | fork、exec 與 Copy-on-Write（選配） | |
+
+> M1 原訂含「依 `MPIDR_EL1` 篩選 core 0」，實測 QEMU 的 `-M virt` 不放出副核心
+> （CPU#1–#3 停在 `_start`，一條指令都沒執行），那段程式碼在這裡驗不了，整包移到 M9。
+> 理由與實測見 [`docs/guide/00-arm-map.html`](docs/guide/00-arm-map.html) 第 3 節。
 
 ## 環境需求
 
