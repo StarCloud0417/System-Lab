@@ -29,12 +29,24 @@ SECTIONS
     }
 
     /*
-     * No .rodata or .data yet - nothing defines any; they arrive in M2.
+     * M2's first string constant created .rodata. Naming it here keeps it out
+     * of ld's orphan-placement heuristic, which is what decides where an
+     * unmentioned section lands - and that decision is not ours to inherit.
+     */
+    .rodata : {
+        *(.rodata .rodata.*)
+    }
+
+    /*
+     * No .data yet - nothing defines an initialised writable global.
      *
-     * Both symbols live inside the braces: outside, ld is free to place an
-     * orphan section (.eh_frame does land here) between __bss_start and .bss,
-     * and the zeroing loop would wipe it. ALIGN(16) at both ends lets that
-     * loop store two registers at a time with no leftover tail.
+     * Both symbols live inside the braces, so nothing can be placed between
+     * __bss_start and the section it names. Measured on binutils 2.38: with
+     * the symbol outside AND no preceding ALIGN, .eh_frame lands between them
+     * and the zeroing loop wipes it. Keeping the ALIGN happens to prevent
+     * that, but by accident - it is an alignment directive, not a guard.
+     * ALIGN(16) at both ends is what lets the loop store two registers at a
+     * time with no leftover tail.
      */
     .bss : {
         . = ALIGN(16);

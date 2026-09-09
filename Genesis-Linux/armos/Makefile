@@ -17,7 +17,10 @@ MACHINE_EL2 := virt,virtualization=on
 GDB     := gdb-multiarch
 
 # 大寫 .S 才會過 C 前處理器（小寫 .s 不會）
-SRC := kernel/boot.S kernel/start.c
+SRC := kernel/boot.S kernel/start.c drivers/uart/pl011.c
+# header 也要列：少了它，改完 platform.h 的位址 make 會說「沒事做」，
+# 產出的 md5 一模一樣 —— 跟漏列 $(LD) 是同一種失敗
+HDR := include/mmio.h include/platform.h include/uart.h
 LD  := linker/kernel-qemu.ld
 
 # 每個旗標對應一個「拿掉就會出現」的失敗：
@@ -27,12 +30,12 @@ LD  := linker/kernel-qemu.ld
 #   -Wl,-T           用我們的佈局，不是 ld 內建的
 #   --build-id=none  讓 .text 從 0x40000000 開始；否則 raw binary 首指令是 udf
 WARN  := -Wall -Wextra -Werror
-FLAGS := -ffreestanding -nostdlib -static -Wl,-T,$(LD) -Wl,--build-id=none
+FLAGS := -ffreestanding -nostdlib -static -Iinclude -Wl,-T,$(LD) -Wl,--build-id=none
 
 all: build/kernel.elf
 
 # $(LD) 必須列進相依：少了它，改完 linker script 會沿用舊 ELF 而且建置「成功」
-build/kernel.elf: $(SRC) $(LD) | build
+build/kernel.elf: $(SRC) $(HDR) $(LD) | build
 	$(CC) $(WARN) $(FLAGS) -o $@ $(SRC)
 
 build:
@@ -42,17 +45,17 @@ build:
 check-env:
 	@CROSS='$(CROSS)' bash scripts/check-env.sh
 
-# 核心還不會輸出任何字，這是唯一的靜態檢查手段
+# 不必開 QEMU 就能檢查產出的指令與位址
 dump: build/kernel.elf
 	$(OBJDUMP) -d $<
 	@$(READELF) -h $< | grep 'Entry point'
 	@$(READELF) -l $<
 
-# 畫面全黑是正確的，UART 驅動要到 M2。離開：先按 Ctrl-A，放開，再按 X
+# 離開：先按 Ctrl-A，放開，再按 X
 qemu: build/kernel.elf
 	$(QEMU) -M $(MACHINE) -cpu cortex-a72 -nographic -kernel $<
 
-# 同上，但在 EL2 交接。核心會自己降到 EL1，畫面一樣是全黑的。
+# 同上，但在 EL2 交接。核心會自己降到 EL1，印出來的東西應該一模一樣。
 qemu-el2: build/kernel.elf
 	$(QEMU) -M $(MACHINE_EL2) -cpu cortex-a72 -nographic -kernel $<
 
