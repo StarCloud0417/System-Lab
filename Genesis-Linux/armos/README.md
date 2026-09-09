@@ -146,6 +146,9 @@ make step1      # 從三行組語開始，一路疊到完整的 boot.S
 `lab/m1/step9.S` 跟 `kernel/boot.S` 的指令完全相同 —— 爬完九階，手上就是這份核心。
 細節見 [`lab/m1/README.md`](lab/m1/README.md)。
 
+`lab/m2` 換一種玩法：**每一階驗證 M2 教材裡的一條宣稱**。最值得跑的是
+`make step5` —— 拿掉 `volatile` 之後，`-O2` 會把「先關掉 UART」那一條整個刪掉。
+
 ### 直接改 repo 的檔案
 
 下面幾個實驗每個大約一分鐘，都可以用 `git checkout .` 復原。
@@ -188,7 +191,7 @@ build/          建置產物（不進版控，可由原始碼完全重建）
 | `git log` | **結果**：這個 commit 做了什麼、為什麼這樣選 |
 | `docs/guide/00-arm-map.html` | **全局**：一顆 ARM64 從通電到跑起 OS 的整張地圖，標出每一格「我們走到哪了」。**建議先讀這份** |
 | `docs/guide/` | **原理**：為什麼會這樣運作，附實測數據與圖解。目前有 [M0](docs/guide/m0-build-and-boot.html)、[M1](docs/guide/m1-boot-flow.html)、[M2](docs/guide/m2-uart.html) |
-| `lab/` | **怎麼跑**：可執行的階梯，一個 `make` 指令跑一階。目前有 [M1](lab/m1/README.md) |
+| `lab/` | **怎麼跑**：可執行的階梯，一個 `make` 指令跑一階。目前有 [M1](lab/m1/README.md)、[M2](lab/m2/README.md) |
 
 兩者不重複：commit message 記「這次改了什麼、為什麼」，教材記「它為什麼會這樣運作」。
 設計上的取捨直接寫在對應的教材裡，跟原理放在一起。
