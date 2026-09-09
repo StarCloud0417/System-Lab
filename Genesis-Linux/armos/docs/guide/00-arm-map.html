@@ -73,7 +73,35 @@ td .chip{margin-right:.3em}
 .stage li.on::before{background:var(--ram)}
 .stage li.here::before{background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .stage .who{font-size:.8rem;color:var(--muted);display:block;margin-top:2px}
-</style><div class="wrap">
+
+html{scroll-behavior:smooth}
+h2{scroll-margin-top:24px}
+.toc{position:fixed;top:52px;left:calc(50% - 640px);width:196px;
+  font-size:.82rem;line-height:1.45;max-height:calc(100vh - 96px);
+  overflow-y:auto;overscroll-behavior:contain;padding-right:8px}
+.toc-t{font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 9px 13px;font-weight:700}
+.toc a{display:block;padding:5px 0 5px 12px;color:var(--muted);
+  text-decoration:none;border-left:2px solid var(--rule)}
+.toc a:hover{color:var(--fg);border-left-color:var(--muted)}
+.toc a.on{color:var(--accent);border-left-color:var(--accent);font-weight:600}
+.toc .n{display:inline-block;min-width:1.5em;opacity:.5;
+  font-variant-numeric:tabular-nums}
+.toc::-webkit-scrollbar{width:5px}
+.toc::-webkit-scrollbar-thumb{background:var(--rule);border-radius:3px}
+@media(max-width:1280px){.toc{display:none}}
+</style><nav class="toc">
+<p class="toc-t">本頁目錄</p>
+<a href="#s0"><span class="n">0</span>先講一個貫穿全篇的東西：特權等級</a>
+<a href="#s1"><span class="n">1</span>時間軸：從按下電源到 shell</a>
+<a href="#s2"><span class="n">2</span>CPU 交到我們手上時，是什麼狀態</a>
+<a href="#s3"><span class="n">3</span>暫存器地圖</a>
+<a href="#s4"><span class="n">4</span>記憶體地圖：位址空間長什麼樣</a>
+<a href="#s5"><span class="n">5</span>例外：唯一的控制流轉移機制</a>
+<a href="#s6"><span class="n">6</span>我們走到哪了</a>
+<a href="#s7"><span class="n">7</span>接下來讀什麼</a>
+</nav>
+<div class="wrap">
 <header>
   <p class="kicker">armos · 入門地圖</p>
   <h1>一顆 ARM64 處理器，從通電到跑起作業系統</h1>
@@ -93,7 +121,7 @@ td .chip{margin-right:.3em}
 <p>每個里程碑收尾時，會有幾格從灰變綠。</p>
 </div>
 
-<h2><span class="num">0</span>先講一個貫穿全篇的東西：特權等級</h2>
+<h2 id="s0"><span class="num">0</span>先講一個貫穿全篇的東西：特權等級</h2>
 
 <p>底下每一節都會提到「EL幾」。先花三十秒把它講完。</p>
 
@@ -115,7 +143,7 @@ EL0   一般使用者程式                    <span style="opacity:.6">M8 之�
 
 <p>細節在 <a href="m1-boot-flow.html">M1 教材</a>第 3–5 節。</p>
 
-<h2><span class="num">1</span>時間軸：從按下電源到 shell</h2>
+<h2 id="s1"><span class="num">1</span>時間軸：從按下電源到 shell</h2>
 
 <p>先講最大的問題：<strong>我們的第一行程式碼，是在什麼時候開始跑的？</strong></p>
 
@@ -168,7 +196,7 @@ EL0   一般使用者程式                    <span style="opacity:.6">M8 之�
 <p>QEMU 更乾脆：它直接把 ELF 載進模擬的 RAM，連韌體都省了。這也是為什麼 <code>-M virt</code> 進來就是 EL1——沒有 hypervisor 需要那一層。</p>
 </div>
 
-<h2><span class="num">2</span>CPU 交到我們手上時，是什麼狀態</h2>
+<h2 id="s2"><span class="num">2</span>CPU 交到我們手上時，是什麼狀態</h2>
 
 <p>下面每一個數字都是<strong>在 <code>_start</code> 第一條指令執行之前</strong>，用 GDB 讀出來的（<code>-M virt</code>、QEMU 6.2.0）。</p>
 
@@ -206,7 +234,7 @@ PC                     = 0x4000002c <span style="opacity:.6">不是 0x200</span>
 
 <p><strong>看這張表最有用的方式：數一下綠色有幾格。</strong> 九個開關，M1 只動了兩個。</p>
 
-<h2><span class="num">3</span>暫存器地圖</h2>
+<h2 id="s3"><span class="num">3</span>暫存器地圖</h2>
 
 <p>QEMU 的 gdb 介面在 <code>virtualization=on</code> 下開放 <strong>411 顆</strong>暫存器。不要一顆一顆看，分成四類就好。</p>
 
@@ -293,7 +321,7 @@ xzr / wzr     零暫存器：讀永遠是 0，寫進去等於丟掉</code></pre>
 
 <p><strong>把不做的東西也畫出來，是這份地圖的重點之一。</strong> 只畫走過的路，那叫足跡，不叫地圖。</p>
 
-<h2><span class="num">4</span>記憶體地圖：位址空間長什麼樣</h2>
+<h2 id="s4"><span class="num">4</span>記憶體地圖：位址空間長什麼樣</h2>
 
 <p>MMU 還沒開，所以現在<strong>每一個位址都是實體位址</strong>——CPU 送出什麼，就直接送到匯流排上。</p>
 
@@ -352,7 +380,7 @@ xzr / wzr     零暫存器：讀永遠是 0，寫進去等於丟掉</code></pre>
 
 <p>那也是為什麼 <code>boot.S</code> 現在比較位址用 <code>b.hs</code>（無號）而不是 <code>b.ge</code>（有號）——最高位元變成 1 之後，有號比較會把位址當成負數。<span class="chip done">M1 ✓</span></p>
 
-<h2><span class="num">5</span>例外：唯一的控制流轉移機制</h2>
+<h2 id="s5"><span class="num">5</span>例外：唯一的控制流轉移機制</h2>
 
 <p>CPU 平常一條一條往下執行。<strong>要打斷它，只有兩種辦法</strong>：程式自己跳（<code>b</code>、<code>bl</code>、<code>ret</code>），或者<strong>發生例外</strong>。</p>
 
@@ -425,7 +453,7 @@ SPSel = 1  →  用 SP_EL1（這一層專屬的）     叫 EL1h，走第 2 列</
 
 <p>M1 就是在做這件事：填好 <code>ELR_EL2</code>（回哪裡）、<code>SPSR_EL2</code>（回去之後是誰）、<code>HCR_EL2</code>（下面守什麼規矩），然後 <code>eret</code>。<span class="chip done">M1 ✓</span></p>
 
-<h2><span class="num">6</span>我們走到哪了</h2>
+<h2 id="s6"><span class="num">6</span>我們走到哪了</h2>
 
 <p>把前面五節攤成一張表。<strong>綠色是做完的。</strong></p>
 
@@ -458,13 +486,14 @@ SPSel = 1  →  用 SP_EL1（這一層專屬的）     叫 EL1h，走第 2 列</
 
 <p><strong>這就是這份地圖存在的理由。</strong> <code>boot.S</code> 那 28 行看起來很硬，但它只解決了「交棒給 C」這一件事。真正讓機器變成作業系統的東西，一個都還沒開始。</p>
 
-<h2><span class="num">7</span>接下來讀什麼</h2>
+<h2 id="s7"><span class="num">7</span>接下來讀什麼</h2>
 
 <div class="tbl">
 <table>
 <tr><th>想知道</th><th>去哪</th></tr>
 <tr><td>建置流程、<code>.S</code> 怎麼變成能跑的映像</td><td><a href="m0-build-and-boot.html">M0 教材</a></td></tr>
 <tr><td>EL 怎麼降、堆疊和 <code>.bss</code> 為什麼非做不可</td><td><a href="m1-boot-flow.html">M1 教材</a></td></tr>
+<tr><td>MMIO、<code>volatile</code>、UART 怎麼把字送出去</td><td><a href="m2-uart.html">M2 教材</a></td></tr>
 <tr><td>親手把 <code>boot.S</code> 從三行疊出來</td><td><code>cd lab/m1 &amp;&amp; make</code></td></tr>
 <tr><td>某個決定為什麼這樣選</td><td><code>git log</code></td></tr>
 </table>
@@ -482,3 +511,24 @@ armos · 入門地圖 · 開發平台 QEMU virt，移植目標 Raspberry Pi 4（
 樹莓派 4 的位址依規格文件，尚無實機驗證
 </footer>
 </div>
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+  var secs = links.map(function (a) {
+    return document.getElementById(a.getAttribute('href').slice(1));
+  });
+  function update() {
+    var y = window.pageYOffset + 130, cur = 0;
+    for (var i = 0; i < secs.length; i++) {
+      if (secs[i] && secs[i].offsetTop <= y) cur = i;
+    }
+    links.forEach(function (a, i) {
+      if (i === cur) a.classList.add('on'); else a.classList.remove('on');
+    });
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update);
+  window.addEventListener('load', update);
+  update();
+})();
+</script>

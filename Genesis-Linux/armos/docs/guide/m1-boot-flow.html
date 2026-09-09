@@ -57,7 +57,39 @@ svg{display:block;max-width:100%;height:auto;margin:0 auto}
 footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
   font-size:.83rem;color:var(--muted)}
 .q{font-weight:600;margin-top:22px}
-</style><div class="wrap">
+
+html{scroll-behavior:smooth}
+h2{scroll-margin-top:24px}
+.toc{position:fixed;top:52px;left:calc(50% - 640px);width:196px;
+  font-size:.82rem;line-height:1.45;max-height:calc(100vh - 96px);
+  overflow-y:auto;overscroll-behavior:contain;padding-right:8px}
+.toc-t{font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 9px 13px;font-weight:700}
+.toc a{display:block;padding:5px 0 5px 12px;color:var(--muted);
+  text-decoration:none;border-left:2px solid var(--rule)}
+.toc a:hover{color:var(--fg);border-left-color:var(--muted)}
+.toc a.on{color:var(--accent);border-left-color:var(--accent);font-weight:600}
+.toc .n{display:inline-block;min-width:1.5em;opacity:.5;
+  font-variant-numeric:tabular-nums}
+.toc::-webkit-scrollbar{width:5px}
+.toc::-webkit-scrollbar-thumb{background:var(--rule);border-radius:3px}
+@media(max-width:1280px){.toc{display:none}}
+</style><nav class="toc">
+<p class="toc-t">本頁目錄</p>
+<a href="#s1"><span class="n">1</span>要解決什麼問題</a>
+<a href="#s2"><span class="n">2</span>動手：跑起來看</a>
+<a href="#s3"><span class="n">3</span>先認識「特權等級」</a>
+<a href="#s4"><span class="n">4</span>為什麼要從 EL2 降到 EL1</a>
+<a href="#s5"><span class="n">5</span>降級是怎麼做到的</a>
+<a href="#s6"><span class="n">6</span>逐行拆解</a>
+<a href="#s7"><span class="n">7</span>堆疊：誰在寫，寫到哪</a>
+<a href="#s8"><span class="n">8</span>.bss：那些零是誰給的</a>
+<a href="#s9"><span class="n">9</span>實測數據</a>
+<a href="#s10"><span class="n">10</span>被推翻的直覺</a>
+<a href="#s11"><span class="n">11</span>精髓</a>
+<a href="#s12"><span class="n">12</span>一頁式小抄</a>
+</nav>
+<div class="wrap">
 <header>
   <p class="kicker">armos · 里程碑 M1</p>
   <h1>開機流程：從韌體手上接過機器</h1>
@@ -68,7 +100,7 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
 不確定這個里程碑在整張圖的哪個位置？先看 <a href="00-arm-map.html">ARM64 全局地圖</a>。
 </p>
 
-<h2><span class="num">1</span>要解決什麼問題</h2>
+<h2 id="s1"><span class="num">1</span>要解決什麼問題</h2>
 
 <p>M0 結束時，核心停在一個遞增暫存器的迴圈裡。它會動，但機器的狀態是<strong>韌體給什麼就是什麼</strong>——我們從來沒問過現在是什麼狀況。</p>
 
@@ -89,7 +121,7 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
 
 <p>所以 M1 的工作是：把上面那張表的差異抹平，變成一個固定的起點，然後才跳進 C。</p>
 
-<h2><span class="num">2</span>動手：跑起來看</h2>
+<h2 id="s2"><span class="num">2</span>動手：跑起來看</h2>
 
 <div class="callout">
 <span class="lbl">想從零疊一遍？看 lab/m1</span>
@@ -309,7 +341,7 @@ $1 = 0x200                 <span style="opacity:.6">← 不是我們的程式碼
 <p><code>lab/m1</code> 的 <code>make step3</code> 和 <code>make step8</code> 都會印這兩個值。</p>
 </div>
 
-<h2><span class="num">3</span>先認識「特權等級」</h2>
+<h2 id="s3"><span class="num">3</span>先認識「特權等級」</h2>
 
 <p>ARM64 把權力分成四層，叫 <strong>Exception Level</strong>（例外等級），簡稱 EL。數字越大權力越大。</p>
 
@@ -367,7 +399,7 @@ $1 = 0x200                 <span style="opacity:.6">← 不是我們的程式碼
 msr  hcr_el2, x9        通用暫存器 → 系統暫存器（<b>M</b>ove to <b>S</b>ystem <b>R</b>egister）</code></pre>
 </div>
 
-<h2><span class="num">4</span>為什麼要從 EL2 降到 EL1</h2>
+<h2 id="s4"><span class="num">4</span>為什麼要從 EL2 降到 EL1</h2>
 
 <p>直接講結論：<strong>今天不降也完全能跑。</strong> 實測把降級程式碼整段拿掉，核心在 EL2 照樣正常執行，沒有任何錯誤訊息。</p>
 
@@ -393,7 +425,7 @@ msr  hcr_el2, x9        通用暫存器 → 系統暫存器（<b>M</b>ove to <b>
 <p><strong>代價要記下來</strong>：多了十幾行今天不做也不會壞的程式碼；而且從此綁定了「核心跑在 EL1」這個前提。日後若要做 hypervisor（自己跑在 EL2、管理底下的客戶 OS），這個決定要整個推翻。目前的規劃裡沒有這件事。</p>
 </div>
 
-<h2><span class="num">5</span>降級是怎麼做到的</h2>
+<h2 id="s5"><span class="num">5</span>降級是怎麼做到的</h2>
 
 <p>ARM 沒有「降低特權等級」這條指令。往上是硬體自動的（發生例外時），<strong>往下只能靠軟體自己走</strong>。</p>
 
@@ -560,7 +592,7 @@ p ($cpsr &gt;&gt; 2) &amp; 3  →  1  <span style="opacity:.6">層級沒變過</
 
 <p><code>0x200</code> 不是隨機的。例外向量表的基底位址存在 <code>VBAR_EL1</code>，重置後是 <code>0</code>；而「同一層、同步例外」的入口在基底 + <code>0x200</code>。<strong>CPU 是規規矩矩地跳去處理例外了</strong>——只是那裡放的是 QEMU 的 device tree（見第 2 節），不是向量表，因為向量表要到 M3 才建。</p>
 
-<h2><span class="num">6</span>逐行拆解</h2>
+<h2 id="s6"><span class="num">6</span>逐行拆解</h2>
 
 <pre><code>_start:
     mrs     x9, CurrentEL           <span style="opacity:.6">讀「我在哪一層」</span>
@@ -644,6 +676,119 @@ halt_loop:                          <span style="opacity:.6">萬一 C 回來了�
 <figcaption>兩條路徑：EL1 進來的直接跳過，EL2 進來的填三個暫存器再用 <code>eret</code> 掉下來，會合於 <code>el1_entry</code></figcaption>
 </figure>
 
+
+<h3>一張圖：腳本的哪一行、記憶體的哪一塊、<code>boot.S</code> 的哪一行</h3>
+
+<p>連結器腳本決定「東西擺在哪」，<code>boot.S</code> 決定「開機時對它們做什麼」。兩邊靠<strong>符號</strong>接起來——腳本寫下 <code>__bss_start = .</code>，組語就能 <code>ldr x9, =__bss_start</code> 把那個位址讀進來。</p>
+
+<figure>
+<svg viewBox="0 0 780 470" role="img" aria-label="連結器腳本、記憶體配置與 boot.S 的三欄對照">
+  <defs>
+    <marker id="ma" markerWidth="8" markerHeight="8" refX="6.5" refY="3" orient="auto">
+      <path d="M0,0 L6.5,3 L0,6" fill="none" stroke="currentColor" stroke-width="1.3"/></marker>
+  </defs>
+  <g font-family="ui-monospace,monospace" fill="currentColor">
+
+    <text x="105" y="18" text-anchor="middle" font-size="11.5" font-weight="700" opacity=".75">連結器腳本</text>
+    <text x="370" y="18" text-anchor="middle" font-size="11.5" font-weight="700" opacity=".75">記憶體</text>
+    <text x="640" y="18" text-anchor="middle" font-size="11.5" font-weight="700" opacity=".75">boot.S</text>
+    <line x1="15" y1="26" x2="765" y2="26" stroke="currentColor" stroke-width="1" opacity=".25"/>
+
+    <rect x="270" y="40" width="200" height="96" fill="var(--kern)" opacity=".14"/>
+    <rect x="270" y="40" width="200" height="96" fill="none" stroke="var(--kern)" stroke-width="1.5"/>
+    <text x="370" y="72" text-anchor="middle" font-size="12.5">.stack</text>
+    <text x="370" y="90" text-anchor="middle" font-size="10.5" opacity=".7">64 KB</text>
+    <line x1="370" y1="98" x2="370" y2="128" stroke="var(--kern)" stroke-width="1.8" marker-end="url(#ma)"/>
+    <text x="382" y="120" font-size="10" opacity=".7">往下長</text>
+
+    <rect x="270" y="150" width="200" height="34" fill="var(--ram)" opacity=".2"/>
+    <rect x="270" y="150" width="200" height="34" fill="none" stroke="var(--ram)" stroke-width="1.5"/>
+    <text x="370" y="165" text-anchor="middle" font-size="12">.bss　迴圈清 0x10</text>
+    <text x="370" y="178" text-anchor="middle" font-size="10" opacity=".7">boot_counter，開機清成 0</text>
+
+    <rect x="270" y="188" width="200" height="16" fill="none" stroke="currentColor" stroke-width="1" opacity=".3" stroke-dasharray="3 2"/>
+    <text x="370" y="200" text-anchor="middle" font-size="9.5" opacity=".6">ALIGN(16) 的 8 bytes 空隙</text>
+
+    <rect x="270" y="208" width="200" height="30" fill="none" stroke="currentColor" stroke-width="1.1" opacity=".5"/>
+    <text x="370" y="227" text-anchor="middle" font-size="11" opacity=".65">.eh_frame　0xf0（沒人用到）</text>
+
+    <rect x="270" y="242" width="200" height="30" fill="var(--mmio)" opacity=".14"/>
+    <rect x="270" y="242" width="200" height="30" fill="none" stroke="var(--mmio)" stroke-width="1.5"/>
+    <text x="370" y="255" text-anchor="middle" font-size="12">.rodata　0x19</text>
+    <text x="370" y="267" text-anchor="middle" font-size="9.5" opacity=".7">"Hello, AArch64 from EL1\n"</text>
+
+    <rect x="270" y="276" width="200" height="120" fill="var(--accent-soft)"/>
+    <rect x="270" y="276" width="200" height="120" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+    <text x="370" y="296" text-anchor="middle" font-size="12.5">.text　0x228</text>
+    <text x="370" y="316" text-anchor="middle" font-size="10" opacity=".75">_start … el1_entry … bss_zero</text>
+    <text x="370" y="331" text-anchor="middle" font-size="10" opacity=".75">enter_c … halt_loop</text>
+    <text x="370" y="351" text-anchor="middle" font-size="10" opacity=".75">kernel_main、uart_init、uart_putc…</text>
+    <text x="370" y="374" text-anchor="middle" font-size="9.5" opacity=".6">字面池：__stack_top / __bss_start</text>
+    <text x="370" y="387" text-anchor="middle" font-size="9.5" opacity=".6">/ __bss_end 三個位址存在這裡</text>
+
+    <text x="262" y="44"  text-anchor="end" font-size="10.5">0x40010350</text>
+    <text x="262" y="154" text-anchor="end" font-size="10.5">0x40000350</text>
+    <text x="262" y="192" text-anchor="end" font-size="10.5">0x40000340</text>
+    <text x="262" y="212" text-anchor="end" font-size="10.5">0x40000338</text>
+    <text x="262" y="246" text-anchor="end" font-size="10.5">0x40000248</text>
+    <text x="262" y="280" text-anchor="end" font-size="10.5">0x40000228</text>
+    <text x="262" y="400" text-anchor="end" font-size="10.5">0x40000000</text>
+
+    <text x="190" y="44"  text-anchor="end" font-size="10">__stack_top = .;</text>
+    <text x="190" y="72"  text-anchor="end" font-size="10" opacity=".7">. += STACK_SIZE;</text>
+    <text x="190" y="154" text-anchor="end" font-size="10">__bss_end = .;</text>
+    <text x="190" y="167" text-anchor="end" font-size="10" opacity=".7">*(.bss .bss.*)</text>
+    <text x="190" y="192" text-anchor="end" font-size="10">__bss_start = .;</text>
+    <text x="190" y="205" text-anchor="end" font-size="10" opacity=".7">. = ALIGN(16);</text>
+    <text x="190" y="227" text-anchor="end" font-size="10" opacity=".55">（腳本沒提，ld 自己擺）</text>
+    <text x="190" y="259" text-anchor="end" font-size="10">*(.rodata .rodata.*)</text>
+    <text x="190" y="296" text-anchor="end" font-size="10">*(.text.boot)</text>
+    <text x="190" y="311" text-anchor="end" font-size="10">*(.text .text.*)</text>
+    <text x="190" y="400" text-anchor="end" font-size="10">. = 0x40000000;</text>
+
+    <line x1="196" y1="40"  x2="266" y2="40"  stroke="currentColor" stroke-width=".9" opacity=".3"/>
+    <line x1="196" y1="150" x2="266" y2="150" stroke="currentColor" stroke-width=".9" opacity=".3"/>
+    <line x1="196" y1="188" x2="266" y2="188" stroke="currentColor" stroke-width=".9" opacity=".3"/>
+    <line x1="196" y1="242" x2="266" y2="242" stroke="currentColor" stroke-width=".9" opacity=".3"/>
+    <line x1="196" y1="396" x2="266" y2="396" stroke="currentColor" stroke-width=".9" opacity=".3"/>
+
+    <line x1="474" y1="40" x2="500" y2="40" stroke="var(--kern)" stroke-width="1.2" opacity=".8"/>
+    <text x="506" y="37" font-size="10.5">ldr x9, =__stack_top</text>
+    <text x="506" y="50" font-size="10.5">mov sp, x9</text>
+    <text x="506" y="63" font-size="9.5" opacity=".6">SP 從這裡出發，往下長</text>
+
+    <line x1="474" y1="150" x2="500" y2="150" stroke="var(--ram)" stroke-width="1.2" opacity=".8"/>
+    <text x="506" y="147" font-size="10.5">ldr x10, =__bss_end</text>
+    <text x="506" y="160" font-size="9.5" opacity=".6">迴圈的終點</text>
+
+    <line x1="474" y1="188" x2="500" y2="188" stroke="var(--ram)" stroke-width="1.2" opacity=".8"/>
+    <text x="506" y="185" font-size="10.5">ldr x9, =__bss_start</text>
+    <text x="506" y="198" font-size="9.5" opacity=".6">迴圈的起點</text>
+
+    <path d="M 478 166 L 492 166" stroke="var(--ram)" stroke-width="1.2" opacity=".8" marker-end="url(#ma)"/>
+    <text x="506" y="216" font-size="10.5">stp xzr, xzr, [x9], #16</text>
+    <text x="506" y="229" font-size="9.5" opacity=".6">只清 __bss_start..__bss_end 共 0x10</text>
+    <text x="506" y="242" font-size="9.5" opacity=".6">碰不到 .rodata，也碰不到堆疊</text>
+
+    <line x1="474" y1="396" x2="500" y2="396" stroke="var(--accent)" stroke-width="1.4"/>
+    <text x="506" y="393" font-size="10.5" font-weight="700">_start</text>
+    <text x="506" y="406" font-size="9.5" opacity=".6">QEMU 把 PC 設在這裡</text>
+    <text x="506" y="419" font-size="9.5" opacity=".6">（ELF header 的 e_entry）</text>
+
+    <line x1="15" y1="440" x2="765" y2="440" stroke="currentColor" stroke-width="1" opacity=".25"/>
+    <text x="15" y="458" font-size="10" opacity=".7">位址由下往上遞增。三欄同一列＝同一件事：腳本挖的洞、記憶體的位置、組語碰它的那一行。</text>
+  </g>
+</svg>
+<figcaption>目前 build 的實測配置（<code>readelf -S</code> 與 <code>nm</code>）。<code>.rodata</code> 是 M2 加的第一個字串常數帶來的；M1 當時還沒有這一塊</figcaption>
+</figure>
+
+<div class="callout">
+<span class="lbl">這張圖說了三件從程式碼看不出來的事</span>
+<p><strong>1. 清零迴圈只走 16 個 byte。</strong> <code>__bss_start</code>（<code>0x40000340</code>）到 <code>__bss_end</code>（<code>0x40000350</code>）中間就 <code>0x10</code>。堆疊那 64 KB、字串常數、程式碼，它一個都不碰——因為腳本把 <code>__bss_start</code> / <code>__bss_end</code> 寫在 <code>.bss { }</code> 的大括號裡面，符號只可能框住 <code>.bss</code> 自己。</p>
+<p><strong>2. 三個位址不是編在指令裡的。</strong> <code>ldr x9, =__stack_top</code> 是去 <code>.text</code> 尾端的<strong>字面池</strong>讀一個 8 byte 的常數（反組譯會看到 <code>.word 0x40010350</code>）。所以那三個位址其實住在程式碼區裡面。</p>
+<p><strong>3. 那 8 bytes 的空隙沒人管。</strong> <code>.bss</code> <strong>區段</strong>從 <code>0x40000338</code> 開始、大小 <code>0x18</code>；但 <code>__bss_start</code> 這個<strong>符號</strong>是 <code>0x40000340</code>——中間差的 8 bytes 是 <code>ALIGN(16)</code> 推出來的。「區段多大」和「迴圈清多少」是兩個數字。清零迴圈從 <code>__bss_start</code> 起跑，永遠不會碰那 8 個 byte。那裡不住變數，所以無害。</p>
+</div>
+
 <h3><code>adr</code> 是什麼指令</h3>
 
 <p><code>adr x9, el1_entry</code> 的意思是「把 <code>el1_entry</code> 這個標籤的<strong>位址</strong>放進 <code>x9</code>」——不是去那個位址讀值，是取位址本身。</p>
@@ -689,7 +834,7 @@ EL2  →  0b1000  =  0x8</code></pre>
 
 <p>所以現在所有暫用都改成 <code>x9</code>／<code>x10</code>，把 <code>x0</code>–<code>x3</code> 原封不動留給後面的里程碑。</p>
 
-<h2><span class="num">7</span>堆疊：誰在寫，寫到哪</h2>
+<h2 id="s7"><span class="num">7</span>堆疊：誰在寫，寫到哪</h2>
 
 <p>到這裡為止全部是組合語言。要交棒給 C，得先給它兩樣東西：<strong>一個堆疊</strong>，和<strong>一塊歸零的記憶體</strong>。這一節講第一樣。</p>
 
@@ -944,7 +1089,7 @@ $ 把三個 ldr = 全改成 adr，重新編譯
 
 <p><strong>會因為改設定而壞掉的寫法，不該用在會被改的東西上。</strong> 好消息是它壞得很大聲——編譯直接失敗，不是跑起來才莫名其妙。</p>
 
-<h2><span class="num">8</span><code>.bss</code>：那些零是誰給的</h2>
+<h2 id="s8"><span class="num">8</span><code>.bss</code>：那些零是誰給的</h2>
 
 <p>C 語言有一條保證：<strong>沒有寫初始值的全域變數，讀出來一定是 0</strong>。</p>
 
@@ -972,6 +1117,23 @@ $ 把三個 ldr = 全改成 adr，重新編譯
 <span class="lbl">注意：<code>.bss</code> 的區段位址不等於 <code>__bss_start</code></span>
 <p>區段從 <code>0x400000e8</code> 開始，但 <code>__bss_start</code> 是 <code>0x400000f0</code> —— 差 8 個 byte。那是連結器腳本裡 <code>.bss { }</code> 開頭那個 <code>. = ALIGN(16);</code> 推出來的，<strong>清零迴圈永遠不會碰到那 8 個 byte</strong>（它從 <code>__bss_start</code> 起跑）。</p>
 <p>沒關係，因為那裡不住任何變數。但這是「區段」和「符號」兩件事的好例子：<code>readelf</code> 看區段，<code>nm</code> 看符號，兩者不一定重合。</p>
+</div>
+
+<div class="callout">
+<span class="lbl">那「預留空間」是誰做的？</span>
+<p>很自然的疑問：<code>.bss</code> 和 <code>.stack</code> 執行時當然要佔記憶體，那誰去把它配出來？</p>
+<p>在 Linux 上，<code>MemSiz</code> 超過 <code>FileSiz</code> 的那一段，是<strong>核心的 ELF 載入器</strong>負責配置<em>而且清成 0</em> 的。程式一跑起來，未初始化的全域變數就已經是 0 了。</p>
+<p><strong>這裡沒有核心。我們就是。</strong> 所以拆開來看：</p>
+<div class="tbl" style="margin:10px 0">
+<table>
+<tr><th>誰</th><th>做了什麼</th></tr>
+<tr><td>連結器</td><td>把 <code>0x40000350</code>–<code>0x40010350</code> 標記成 <code>.stack</code>，<strong>保證不會把別的東西也放進去</strong></td></tr>
+<tr><td>QEMU</td><td>讀 <code>MemSiz</code>，知道要留這麼多空間</td></tr>
+<tr><td><strong>沒有人</strong></td><td><strong>把那塊清成 0</strong></td></tr>
+</table>
+</div>
+<p><strong>在裸機上，「配置記憶體」不是一個動作，是一個約定。</strong> RAM 本來就在那裡，連結器只是宣告「這段是我的」。沒有人交付、沒有人初始化。</p>
+<p>這一條打通三件事：為什麼 <code>boot.S</code> 非得自己清 <code>.bss</code>、為什麼 <code>SP</code> 重置後是 <code>0x0</code> 而不是某個合理的值、以及為什麼「記憶體配置器」要等到 M6 —— 那時我們才開始扮演 Linux 現在替別人扮演的角色。</p>
 </div>
 
 <p>檔案裡 232 bytes，記憶體要 65792 bytes，<strong>差 65560 bytes</strong>。拆開來就是 <code>.stack</code> 的 65536、<code>.bss</code> 的 16，再加 8 bytes 的對齊填補（<code>.eh_frame</code> 結束於 <code>0x400000e8</code>，<code>.bss</code> 起於 <code>0x400000f0</code>）——通通是「說好了要有，但沒存」的空間。</p>
@@ -1115,7 +1277,7 @@ Aborted (core dumped)</code></pre>
 <p>要一次弄髒 8 個 byte 的話，改用 GDB：<code>set *(unsigned long *)0x400000f0 = 0xdeadbeefcafe1234</code>。</p>
 </div>
 
-<h2><span class="num">9</span>實測數據</h2>
+<h2 id="s9"><span class="num">9</span>實測數據</h2>
 
 <p>這一節是<strong>數值彙整</strong>，方便日後查；操作步驟在第 2 節。量於 binutils 2.38 / gcc 11.4.0 / QEMU 6.2.0 / gdb 12.1（Ubuntu 22.04）。</p>
 
@@ -1193,7 +1355,7 @@ stp 之後    0x40000098   0x400100f0                 <span style="opacity:.6">�
 </table>
 </div>
 
-<h2><span class="num">10</span>被推翻的直覺</h2>
+<h2 id="s10"><span class="num">10</span>被推翻的直覺</h2>
 
 <div class="callout myth">
 <span class="lbl">直覺 1</span>
@@ -1323,7 +1485,7 @@ $VBAR_EL1 → void      $VBAR    → 0x0</code></pre>
 <p>今天沒事是因為前面那個 <code>ALIGN(16)</code> 剛好把 <code>__bss_start</code> 推過了 <code>.eh_frame</code>——<strong>一個為了對齊寫的東西意外擋住了不相干的問題</strong>。移進大括號裡面，位址一個都沒變，但 ld 再也沒地方塞東西。</p>
 </div>
 
-<h2><span class="num">11</span>精髓</h2>
+<h2 id="s11"><span class="num">11</span>精髓</h2>
 
 <ol>
   <li><strong>權力往上是自動的，往下要自己走。</strong> 硬體只在出事時把你抬上去，從來不會主動把你放下來。降級是軟體的責任，而且要借用「返回」這個機制來完成。</li>
@@ -1333,7 +1495,7 @@ $VBAR_EL1 → void      $VBAR    → 0x0</code></pre>
   <li><strong>會失敗的實驗才叫實驗。</strong> 看到 <code>boot_counter == 0</code> 不能證明清零有效，因為它本來就可能是 0。<strong>先弄髒</strong>，答案才有兩種可能，結果才有意義。</li>
 </ol>
 
-<h2><span class="num">12</span>一頁式小抄</h2>
+<h2 id="s12"><span class="num">12</span>一頁式小抄</h2>
 
 <div class="cheat">
 <h3>三個暫存器</h3>
@@ -1406,3 +1568,24 @@ armos · 里程碑 M1 · 開發平台 QEMU virt，移植目標 Raspberry Pi 4（
 程式碼：<code>kernel/boot.S</code>、<code>kernel/start.c</code>、<code>linker/kernel-qemu.ld</code>
 </footer>
 </div>
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+  var secs = links.map(function (a) {
+    return document.getElementById(a.getAttribute('href').slice(1));
+  });
+  function update() {
+    var y = window.pageYOffset + 130, cur = 0;
+    for (var i = 0; i < secs.length; i++) {
+      if (secs[i] && secs[i].offsetTop <= y) cur = i;
+    }
+    links.forEach(function (a, i) {
+      if (i === cur) a.classList.add('on'); else a.classList.remove('on');
+    });
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update);
+  window.addEventListener('load', update);
+  update();
+})();
+</script>

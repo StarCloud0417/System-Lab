@@ -56,8 +56,38 @@ svg{display:block;max-width:100%;height:auto;margin:0 auto}
 footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
   font-size:.83rem;color:var(--muted)}
 .q{font-weight:600;margin-top:22px}
+
+html{scroll-behavior:smooth}
+h2{scroll-margin-top:24px}
+.toc{position:fixed;top:52px;left:calc(50% - 640px);width:196px;
+  font-size:.82rem;line-height:1.45;max-height:calc(100vh - 96px);
+  overflow-y:auto;overscroll-behavior:contain;padding-right:8px}
+.toc-t{font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 9px 13px;font-weight:700}
+.toc a{display:block;padding:5px 0 5px 12px;color:var(--muted);
+  text-decoration:none;border-left:2px solid var(--rule)}
+.toc a:hover{color:var(--fg);border-left-color:var(--muted)}
+.toc a.on{color:var(--accent);border-left-color:var(--accent);font-weight:600}
+.toc .n{display:inline-block;min-width:1.5em;opacity:.5;
+  font-variant-numeric:tabular-nums}
+.toc::-webkit-scrollbar{width:5px}
+.toc::-webkit-scrollbar-thumb{background:var(--rule);border-radius:3px}
+@media(max-width:1280px){.toc{display:none}}
 </style>
 
+<nav class="toc">
+<p class="toc-t">本頁目錄</p>
+<a href="#s1"><span class="n">1</span>要解決什麼問題</a>
+<a href="#s2"><span class="n">2</span>動手：建置與觀察</a>
+<a href="#s3"><span class="n">3</span>完整路徑</a>
+<a href="#s4"><span class="n">4</span>心智模型</a>
+<a href="#s5"><span class="n">5</span>逐段拆解</a>
+<a href="#s6"><span class="n">6</span>實測數據</a>
+<a href="#s7"><span class="n">7</span>被推翻的直覺</a>
+<a href="#s8"><span class="n">8</span>精髓</a>
+<a href="#s9"><span class="n">9</span>面試 60 秒</a>
+<a href="#s10"><span class="n">10</span>一頁式小抄</a>
+</nav>
 <div class="wrap">
 <header>
   <p class="kicker">armos · 里程碑 M0</p>
@@ -69,7 +99,7 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
 不確定這個里程碑在整張圖的哪個位置？先看 <a href="00-arm-map.html">ARM64 全局地圖</a>。
 </p>
 
-<h2><span class="num">1</span>要解決什麼問題</h2>
+<h2 id="s1"><span class="num">1</span>要解決什麼問題</h2>
 
 <p>目標小得有點荒謬：讓一顆 ARM64 的 CPU 執行三條我們自己寫的指令，並且<strong>能證明它真的執行了</strong>。</p>
 
@@ -83,7 +113,7 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
 
 <p>所以 M0 真正要建立的，是一條<strong>看得見的回饋迴路</strong>：改一行 → 建置 → 跑起來 → 看得到差異。這條迴路建立不起來，後面每個里程碑都是在瞎猜。</p>
 
-<h2><span class="num">2</span>動手：建置與觀察</h2>
+<h2 id="s2"><span class="num">2</span>動手：建置與觀察</h2>
 
 <p>後面幾節都在解釋原理，但原理讀十遍不如親眼看一次。這一節是一份可以照著打的操作步驟，六步做完大約十分鐘，你會親眼看到這個核心被建置、被載入、以及<strong>被 CPU 執行</strong>。建議先做完這一節，再回頭讀第 3 節之後的說明。</p>
 
@@ -215,7 +245,7 @@ memory@40000000 {
 <p><code>git checkout .</code> 把改動全部丟掉，<code>make clean &amp;&amp; make</code> 重建。如果你想留著實驗，改用 <code>git stash</code>。</p>
 </div>
 
-<h2><span class="num">3</span>完整路徑</h2>
+<h2 id="s3"><span class="num">3</span>完整路徑</h2>
 
 <p>從一個 <code>.S</code> 檔到 CPU 執行，中間經過這些人的手：</p>
 
@@ -339,7 +369,7 @@ dtc -I dtb -O dts build/virt.dtb        # 二進位 .dtb 轉成人看得懂的 .
 
 <p>關鍵在最後一段：<code>-kernel</code> 讓 QEMU 扮演作業系統 loader 的角色。它讀 ELF 檔的 program header，把每個 <code>PT_LOAD</code> 區段搬到 header 記載的實體位址，然後從進入點開始執行。</p>
 
-<h2><span class="num">4</span>心智模型</h2>
+<h2 id="s4"><span class="num">4</span>心智模型</h2>
 
 <h3>先說清楚：<code>-M virt</code> 是什麼</h3>
 
@@ -492,7 +522,47 @@ memory@40000000 {
 <figcaption>ld 自己決定怎麼把 section 打包成 segment。<code>make dump</code> 最下面的 Section to Segment mapping 就是這張圖的實際輸出</figcaption>
 </figure>
 
-<h2><span class="num">5</span>逐段拆解</h2>
+<div class="callout">
+<span class="lbl">怎麼一眼看出哪些 section 不進記憶體</span>
+<p><code>readelf -S</code> 的輸出裡，看 <strong>Address 欄</strong>就好：</p>
+<pre style="margin:10px 0"><code>[ 1] .text      PROGBITS  <b>0000000040000000</b>  ← 有位址，會進記憶體
+[ 4] .bss       NOBITS    <b>0000000040000338</b>  ← 同上
+[ 6] .comment   PROGBITS  <b>0000000000000000</b>  ← 位址 0，不進
+[ 7] .symtab    SYMTAB    <b>0000000000000000</b>  ← 不進
+[ 8] .strtab    STRTAB    <b>0000000000000000</b>  ← 不進</code></pre>
+<p><strong>位址 0 不是「放在位址 0」，是「沒有位址」</strong>——這些 section 只存在於檔案裡，從來不會被搬進 RAM。（<code>Flg</code> 欄有 <code>A</code>（Alloc）的才會，兩種看法等價。）</p>
+
+<div class="tbl" style="margin:14px 0 10px">
+<table>
+<tr><th>section</th><th>裡面是什麼</th><th>誰在用</th></tr>
+<tr><td><code>.comment</code></td><td>一行字串：<code>GCC: (Ubuntu 11.4.0…) 11.4.0</code>，45 bytes</td><td>事後追查「這個 binary 誰編的」</td></tr>
+<tr><td><code>.symtab</code></td><td><strong>符號表</strong>：名字 ↔ 位址 ↔ 大小 ↔ 型別。目前 36 個</td><td><code>nm</code>、GDB 的 <code>break kernel_main</code></td></tr>
+<tr><td><code>.strtab</code></td><td>上面那些<strong>名字的字元</strong>本身</td><td><code>.symtab</code> 每一列只存「名字從第幾個字元開始」</td></tr>
+<tr><td><code>.shstrtab</code></td><td>同理，但存的是 <strong>section 自己的名字</strong>（<code>.text</code> 這幾個字）</td><td><code>readelf -S</code> 印表頭時查它</td></tr>
+</table>
+</div>
+
+<p><strong>「ELF 檔多大」和「核心佔多少記憶體」是兩個數字。</strong> 目前這份 ELF 是 68200 bytes，<code>strip</code> 之後剩 66976——但實際載入記憶體的內容，兩者完全一樣。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl"><code>.symtab</code> 跟 <code>-g</code> 沒有關係</span>
+<p>很容易以為符號表是 <code>-g</code> 帶來的。實測四種組合：</p>
+<pre style="margin:10px 0"><code>                          .symtab   .debug_*   檔案大小
+沒有 -g                      有        ✗        68200   ← 目前
+有 -g                        有        6 個      70960
+-g 後 strip --strip-debug    有        ✗        68104
+-g 後 strip                  ✗         ✗        66976</code></pre>
+<p><strong>連結器永遠會做 <code>.symtab</code></strong>，這就是為什麼現在沒開 <code>-g</code>，<code>nm</code> 和 <code>break kernel_main</code> 照樣能用。</p>
+<p><code>-g</code> 加的是<strong>另外六個</strong> <code>.debug_*</code>——型別、行號、變數在哪個暫存器：</p>
+<pre style="margin:10px 0 0"><code>只有 .symtab      break kernel_main       ✅ 認得名字
+                  print boot_counter      ❌ unknown type
+
+加上 .debug_*     Breakpoint 1 … at kernel/start.c:23
+                  print boot_counter      ✅ $1 = 0</code></pre>
+</div>
+
+<h2 id="s5"><span class="num">5</span>逐段拆解</h2>
 
 <h3>boot.S — 為什麼不是 <code>b .</code></h3>
 
@@ -607,7 +677,7 @@ SECTIONS                            <span style="opacity:.6">──② 佈局規
 <p>把 linker script 列進 <code>build/kernel.elf</code> 的相依項。少了它，改完 linker script 執行 <code>make</code> 會顯示 <code>Nothing to be done</code>，沿用舊的 ELF——<strong>建置是「成功」的，位址卻是舊的</strong>。這種錯最難查，因為所有訊號都說沒問題。</p>
 </div>
 
-<h2><span class="num">6</span>實測數據</h2>
+<h2 id="s6"><span class="num">6</span>實測數據</h2>
 
 <p>以下都量於 binutils 2.38 / gcc 11.4.0 / QEMU 6.2.0 / gdb 12.1（Ubuntu 22.04）。<strong>ld 的孤兒 section 擺放規則、gdb 的 prologue 判斷、預設頁大小三者都會隨版本改變</strong>，換工具鏈請重新量。</p>
 
@@ -687,7 +757,7 @@ $2 = 2
 
 <p>注意 <code>p $CurrentEL</code> 在 gdb 12.1 回傳 <code>void</code>——它沒有把這個系統暫存器暴露給遠端目標，所以只能繞道 PSTATE。</p>
 
-<h2><span class="num">7</span>被推翻的直覺</h2>
+<h2 id="s7"><span class="num">7</span>被推翻的直覺</h2>
 
 <p>這一節是這份教材裡最貴的部分。以下每一條都是「原本以為是這樣，實測之後發現不是」。</p>
 
@@ -739,7 +809,7 @@ $2 = 2
 <p>這是一個<strong>在這個平台上做不出來的實驗</strong>。M1 還是要寫歸零迴圈，理由只能是推理，不能是實測。知道哪些事情「這裡驗不了」，跟知道哪些事情驗得了一樣重要。</p>
 </div>
 
-<h2><span class="num">8</span>精髓</h2>
+<h2 id="s8"><span class="num">8</span>精髓</h2>
 
 <p>如果 M0 只能留下三句話：</p>
 
@@ -749,7 +819,7 @@ $2 = 2
   <li><strong>「建置成功」不等於「做對了」。</strong> M0 遇到的三個坑——linker script 沒列進相依、section 名稱拼錯、build-id 佔住載入位址——全部都是<strong>建置完全成功</strong>的情況下發生的。裸機開發沒有 segfault 幫你擋，唯一的防線是自己動手量。</li>
 </ol>
 
-<h2><span class="num">9</span>面試 60 秒</h2>
+<h2 id="s9"><span class="num">9</span>面試 60 秒</h2>
 
 <p class="q">Q：一個裸機核心從編譯到執行，中間發生了什麼？</p>
 <p>原始碼經過組譯得到 <code>.o</code>，連結時用自訂的 linker script 取代 ld 的預設佈局，指定程式碼放在 <code>0x4000_0000</code>——這個位址來自目標板的 device tree，是 RAM 的起點，再低就是 MMIO 了。linker script 的 <code>ENTRY()</code> 會填 ELF header 的 <code>e_entry</code>。QEMU 以 <code>-kernel</code> 扮演 ELF loader，把 <code>PT_LOAD</code> 區段搬到 program header 記載的實體位址，再把 PC 設到進入點。整個過程沒有作業系統參與，所以要自己下 <code>-nostdlib</code> 擋掉 C 啟動檔，否則它會帶進自己的 <code>_start</code> 造成重複定義。</p>
@@ -758,7 +828,7 @@ $2 = 2
 <p>用 QEMU 的 <code>-S -s</code> 停在第一條指令並開 GDB 遠端埠。核心停在一個遞增暫存器的迴圈，不是 <code>b .</code>——因為停住的核心和空轉的核心從外面看一樣，遞增值才能區分。連續中斷兩次，值不同就證明在執行。（<code>readelf</code> 只能確認 ELF 建對了，證明不了 CPU 有沒有跑，這是兩回事。）</p>
 
 <div class="cheat">
-<h2 style="border:none;padding-top:0;margin-top:20px"><span class="num">10</span>一頁式小抄</h2>
+<h2 id="s10" style="border:none;padding-top:0;margin-top:20px"><span class="num">10</span>一頁式小抄</h2>
 
 <h3>常用指令</h3>
 <pre><code>make            建置（零警告）
@@ -797,3 +867,24 @@ armos · 里程碑 M0 · 開發平台 QEMU virt，移植目標 Raspberry Pi 4（
 程式碼：<code>kernel/boot.S</code>、<code>linker/kernel-qemu.ld</code>、<code>Makefile</code>
 </footer>
 </div>
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+  var secs = links.map(function (a) {
+    return document.getElementById(a.getAttribute('href').slice(1));
+  });
+  function update() {
+    var y = window.pageYOffset + 130, cur = 0;
+    for (var i = 0; i < secs.length; i++) {
+      if (secs[i] && secs[i].offsetTop <= y) cur = i;
+    }
+    links.forEach(function (a, i) {
+      if (i === cur) a.classList.add('on'); else a.classList.remove('on');
+    });
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update);
+  window.addEventListener('load', update);
+  update();
+})();
+</script>

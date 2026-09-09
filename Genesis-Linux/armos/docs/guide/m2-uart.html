@@ -1,0 +1,1311 @@
+<title>M2：UART 驅動</title>
+<style>
+:root{
+  --bg:#fbfaf8; --fg:#1c1b19; --muted:#6b6862; --rule:#e0ddd6;
+  --card:#ffffff; --code-bg:#f4f2ee; --accent:#8a4b2a; --accent-soft:#f0e6df;
+  --ram:#7a9a6b; --mmio:#b08442; --kern:#8a4b2a;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#17181a; --fg:#e6e4e0; --muted:#9a968e; --rule:#2e3033;
+    --card:#1e2023; --code-bg:#232629; --accent:#d99b6c; --accent-soft:#2b2320;
+    --ram:#8fb07e; --mmio:#c9a05c; --kern:#d99b6c;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0; padding:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,"Segoe UI","Noto Sans TC","PingFang TC",sans-serif;
+  line-height:1.85; font-size:16.5px;
+}
+.wrap{max-width:820px;margin:0 auto;padding:56px 24px 96px}
+header{border-bottom:2px solid var(--fg);padding-bottom:22px;margin-bottom:8px}
+.kicker{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+h1{font-size:2.1rem;line-height:1.25;margin:0 0 12px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0;font-size:1rem}
+h2{font-size:1.28rem;margin:56px 0 4px;padding-top:24px;border-top:1px solid var(--rule);letter-spacing:-.005em}
+h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:.5em;font-weight:600}
+h3{font-size:1rem;margin:32px 0 8px;color:var(--accent)}
+h4{font-size:.92rem;margin:24px 0 6px;color:var(--fg);opacity:.85}
+p{margin:14px 0}
+ul,ol{margin:14px 0;padding-left:1.4em}
+li{margin:7px 0}
+code{font-family:"SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+  font-size:.87em;background:var(--code-bg);padding:.12em .4em;border-radius:4px}
+pre{background:var(--code-bg);border:1px solid var(--rule);border-radius:8px;
+  padding:16px 18px;overflow-x:auto;margin:18px 0;line-height:1.6}
+pre code{background:none;padding:0;font-size:.83rem}
+.tbl{overflow-x:auto;margin:18px 0}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}
+td code{white-space:nowrap}
+figure{margin:28px 0}
+figcaption{font-size:.82rem;color:var(--muted);margin-top:10px;text-align:center}
+svg{display:block;max-width:100%;height:auto;margin:0 auto}
+.callout{background:var(--card);border:1px solid var(--rule);border-left:3px solid var(--accent);
+  border-radius:0 8px 8px 0;padding:16px 20px;margin:22px 0}
+.callout .lbl{font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);
+  font-weight:700;display:block;margin-bottom:6px}
+.callout p{margin:8px 0}
+.callout p:first-of-type{margin-top:0}
+.callout p:last-child{margin-bottom:0}
+.myth{border-left-color:var(--mmio)}
+.myth .lbl{color:var(--mmio)}
+.cheat{background:var(--accent-soft);border:1px solid var(--rule);border-radius:10px;padding:6px 24px 20px;margin:24px 0}
+.cheat h3{margin-top:20px}
+footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);
+  font-size:.83rem;color:var(--muted)}
+.q{font-weight:600;margin-top:22px}
+
+html{scroll-behavior:smooth}
+h2{scroll-margin-top:24px}
+.toc{position:fixed;top:52px;left:calc(50% - 640px);width:196px;
+  font-size:.82rem;line-height:1.45;max-height:calc(100vh - 96px);
+  overflow-y:auto;overscroll-behavior:contain;padding-right:8px}
+.toc-t{font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 9px 13px;font-weight:700}
+.toc a{display:block;padding:5px 0 5px 12px;color:var(--muted);
+  text-decoration:none;border-left:2px solid var(--rule)}
+.toc a:hover{color:var(--fg);border-left-color:var(--muted)}
+.toc a.on{color:var(--accent);border-left-color:var(--accent);font-weight:600}
+.toc .n{display:inline-block;min-width:1.5em;opacity:.5;
+  font-variant-numeric:tabular-nums}
+.toc::-webkit-scrollbar{width:5px}
+.toc::-webkit-scrollbar-thumb{background:var(--rule);border-radius:3px}
+@media(max-width:1280px){.toc{display:none}}
+</style><nav class="toc">
+<p class="toc-t">本頁目錄</p>
+<a href="#s1"><span class="n">1</span>要解決什麼問題</a>
+<a href="#s2"><span class="n">2</span>動手：跑起來看</a>
+<a href="#s3"><span class="n">3</span>MMIO：用寫記憶體的方式操作硬體</a>
+<a href="#s4"><span class="n">4</span>PL011 的六個暫存器</a>
+<a href="#s5"><span class="n">5</span>鮑率：一個除法拆成兩個暫存器</a>
+<a href="#s6"><span class="n">6</span>三個設計選擇</a>
+<a href="#s7"><span class="n">7</span>C 語言：這些寫法為什麼是這樣</a>
+<a href="#s8"><span class="n">8</span>被推翻的直覺</a>
+<a href="#s9"><span class="n">9</span>實測數據</a>
+<a href="#s10"><span class="n">10</span>精髓</a>
+<a href="#s11"><span class="n">11</span>一頁式小抄</a>
+</nav>
+<div class="wrap">
+<header>
+  <p class="kicker">armos · 里程碑 M2</p>
+  <h1>UART：讓程式自己說話</h1>
+  <p class="sub">M1 之前，唯一的觀察手段是 GDB。這一節之後，核心可以自己印東西出來</p>
+</header>
+
+<p style="margin-top:22px;font-size:.9rem;color:var(--muted)">
+不確定這個里程碑在整張圖的哪個位置？先看 <a href="00-arm-map.html">ARM64 全局地圖</a>。
+</p>
+
+<div class="callout">
+<span class="lbl">想動手驗證這份教材？</span>
+<p><code>lab/m2/</code> 有九階，<strong>每一階都在驗證下面某一條宣稱</strong>——不用改任何檔案，位址自動查：</p>
+<pre style="margin:10px 0 0"><code>cd lab/m2
+make            <span style="opacity:.6">看有哪些階梯</span>
+make step5      <span style="opacity:.6">★ volatile 在 -O2 下救了哪一條指令</span></code></pre>
+</div>
+
+<div class="callout">
+<span class="lbl">這份教材還在長</span>
+<p>M2 有五個交付物：UART 驅動、<code>string.c</code>、<code>printf.c</code>、輸入 echo、<code>panic()</code>。這份目前只寫完<strong>第一個</strong>，後面每完成一包就會加一節。</p>
+</div>
+
+<h2 id="s1"><span class="num">1</span>要解決什麼問題</h2>
+
+<p>現在要看一個變數的值，你得做這些事：</p>
+
+<pre><code>1. 開 QEMU，加 -S 讓它凍住
+2. 另一個視窗接上 GDB
+3. 想清楚要在哪裡下斷點
+4. continue，然後 p/x 那個變數</code></pre>
+
+<p>想知道「程式跑到哪一行了」也一樣 —— 先下斷點，再看它有沒有停。</p>
+
+<p><strong>有了 UART，這一切變成一行 <code>uart_puts("到這裡了\n")</code>。</strong></p>
+
+<p>這不只是方便。M5 要蓋分頁表、M7 要做 context switch，那些東西的中間狀態<strong>用斷點看不完</strong> —— 你需要它一邊跑一邊告訴你發生什麼事。所以 M2 排在這個位置：它是後面每個里程碑的除錯基礎設施。</p>
+
+<h2 id="s2"><span class="num">2</span>動手：跑起來看</h2>
+
+<pre><code>$ make qemu
+Hello, AArch64 from EL1</code></pre>
+
+<p>就這樣。離開是先按 <kbd>Ctrl-A</kbd>，放開，再按 <kbd>X</kbd>。</p>
+
+<p>想看實際送出去的位元組（而不是終端機幫你渲染過的結果）：</p>
+
+<pre><code>$ qemu-system-aarch64 -M virt -cpu cortex-a72 -display none \
+      -serial file:/tmp/out.log -kernel build/kernel.elf
+（跑兩秒後 Ctrl-C）
+
+$ xxd /tmp/out.log
+00000000: 4865 6c6c 6f2c 2041 4172 6368 3634 2066  Hello, AArch64 f
+00000010: 726f 6d20 454c 310d 0a                   rom EL1..</code></pre>
+
+<p>結尾是 <code>0d 0a</code>，不是單一個 <code>0a</code>。<strong>那兩個位元組是我們自己加的</strong>，原因在第 6 節。</p>
+
+<h2 id="s3"><span class="num">3</span>MMIO：用寫記憶體的方式操作硬體</h2>
+
+<p><strong>MMIO</strong> = memory-mapped I/O，記憶體對映輸入輸出。</p>
+
+<p>周邊裝置（UART、計時器、中斷控制器）的控制暫存器，被硬體<strong>擺在記憶體位址空間裡</strong>。你用一般的 <code>ldr</code>／<code>str</code> 讀寫那些位址，就等於在對硬體下指令。</p>
+
+<pre><code>0x0900_0000   ← 這個位址不是 RAM，是 UART 的資料暫存器
+              往這裡寫一個 byte = 送出一個字元</code></pre>
+
+<p>M1 的記憶體地圖你看過：<code>0x0</code> 到 <code>0x4000_0000</code> 那一整段都是 flash 和 MMIO，RAM 從 <code>0x4000_0000</code> 才開始。UART 就住在那一段裡。</p>
+
+<h3>位址從哪來</h3>
+
+<p><strong>不是從資料手冊抄的，是問 QEMU 要的：</strong></p>
+
+<pre><code>$ make dtb          <span style="opacity:.6">讓 QEMU 吐出它自己的 device tree</span>
+
+pl011@9000000 {
+    compatible = "arm,pl011", "arm,primecell";
+    reg = &lt;0x00 0x9000000 0x00 0x1000&gt;;      <span style="opacity:.6">← 基底位址與大小</span>
+    clock-names = "uartclk", "apb_pclk";
+    clocks = &lt;0x8000 0x8000&gt;;                <span style="opacity:.6">← 指向下面那個節點</span>
+};
+
+apb-pclk {
+    phandle = &lt;0x8000&gt;;
+    clock-output-names = "clk24mhz";
+    clock-frequency = &lt;0x16e3600&gt;;           <span style="opacity:.6">← 24,000,000 Hz</span>
+};</code></pre>
+
+<p>三個沒見過的欄位名：<code>compatible</code> 是「這個裝置是什麼型號」，作業系統靠它決定要用哪支驅動；<code>reg</code> 是「它的暫存器擺在哪、佔多大」；<code>phandle</code> 是節點的編號，讓別的節點可以指過來——上面 <code>clocks = &lt;0x8000&gt;</code> 指的就是下面 <code>phandle = &lt;0x8000&gt;</code> 那個時脈節點。</p>
+
+<div class="callout">
+<span class="lbl">位址不是免費的：組一個要兩條指令</span>
+<p>AArch64 的指令<strong>固定 32 位元</strong>，所以指令裡塞不下一個 64 位元的常數。編譯器一次搬 16 位：</p>
+<pre style="margin:10px 0"><code>mov  x0, #0x30              先放低 16 位   x0 = 0x0000_0000_0000_0030
+movk x0, #0x900, lsl #16    再塞 bit16-31  x0 = 0x0000_0000_0900_0030</code></pre>
+<p><code>movk</code> = move <strong>keep</strong>——只改指定的那 16 位，其他位元保留。（<code>mov</code> 會把整顆清掉再寫，所以只能用在第一次。）</p>
+<p>所以 <strong>每一次 MMIO 存取，光是「產生位址」就花掉兩條指令</strong>。現在無所謂，M4 寫中斷處理常式時就會開始計較——那段程式碼每秒要跑幾千次。</p>
+</div>
+
+<p><strong>PL011</strong> 是 ARM 設計的 UART 控制器型號。QEMU virt 和樹莓派 4 用的都是它 —— 這是 M9 移植時驅動能沿用的原因，只有位址不同。</p>
+
+<h3>為什麼非要 <code>volatile</code> 不可</h3>
+
+<p>編譯器看到「連續寫同一個位址三次」，會認為前兩次沒意義，只留最後一次。對 RAM 這是正確的優化。<strong>對 MMIO 是災難</strong> —— 那三次是三個字元。</p>
+
+<p><code>volatile</code> 就是告訴編譯器：<strong>這個位址每一次存取都算數，不准合併、不准省略、不准換順序。</strong></p>
+
+<div class="callout">
+<span class="lbl">但它不會產生任何指令</span>
+<p>這點很容易誤會。把 <code>mmio_write32</code> 的 <code>volatile</code> 拿掉，重編、比對那一條真正寫硬體的指令：</p>
+<pre style="margin:10px 0"><code>有 volatile   400000c8:  b9000001   str  w1, [x0]
+無 volatile   400000c8:  b9000001   str  w1, [x0]
+                         ↑ 連機器碼都一模一樣</code></pre>
+<p><strong><code>volatile</code> 不加指令，它禁止編譯器<em>拿掉</em>指令。</strong></p>
+<p>所以它的效果只在「有人想拿掉」的時候才看得見——<code>-O0</code> 下沒人要拿，兩邊自然相同；<code>-O2</code> 下有人要拿，那時才擋得住。第 8 節的直覺 2 就是那個場面。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">但這件事現在證明不出來</span>
+<p>本專案目前沒有加任何 <code>-O</code> 旗標，也就是 <code>-O0</code>。實測 <code>-O0</code> 下<strong>加不加 <code>volatile</code>，產出的組語逐位元組相同</strong>。</p>
+<p>照鐵則五的字面判準（「拿掉它現在會壞嗎」），<code>volatile</code> 現在不會壞。</p>
+<p><strong>但把 <code>-O0</code> 換成 <code>-O2</code>，「拿掉 <code>volatile</code>」就會壞了</strong>——而且壞的方式非常漂亮，見第 8 節。</p>
+<p>講清楚免得誤會：<strong><code>volatile</code> 本身在 <code>-O2</code> 下是有效的</strong>，該保留的寫入一條都不會少。會壞的是「拿掉它」那一邊。<code>-O0</code> 看不出差別，只是因為那個等級的編譯器本來就不做這種優化。</p>
+</div>
+
+<h3>所有 MMIO 都走同一個門</h3>
+
+<pre><code>static inline void mmio_write32(uintptr_t addr, uint32_t value)
+{
+    *(volatile uint32_t *)addr = value;
+}</code></pre>
+
+<p>專案禁止任何地方直接寫 <code>*(volatile uint32_t *)addr = v</code>。理由是<strong>忘記 <code>volatile</code> 不會有任何錯誤訊息</strong> —— 它會安靜地少印字元。集中成兩個函式，就只剩一個地方可能寫錯。</p>
+
+<h2 id="s4"><span class="num">4</span>PL011 的六個暫存器</h2>
+
+<div class="callout">
+<span class="lbl">先講 FIFO</span>
+<p><strong>FIFO</strong>（first in, first out，先進先出）是一個小佇列。UART 送一個字元到線上要花時間（115200 bps 下約 87 微秒），如果軟體每送一個就得等它走完，CPU 大部分時間都在發呆。</p>
+<p>所以硬體準備了一個 <strong>16 格的佇列</strong>：軟體把字元丟進去就走，硬體自己慢慢送。丟滿 16 個才需要等。</p>
+<p><code>FR</code> 裡的旗標就是在回報這個佇列的狀態：<code>TXFF</code>（transmit FIFO full）滿了、<code>TXFE</code>（empty）空了；<code>RX</code> 開頭的是接收那一側的同名旗標。</p>
+</div>
+
+<div class="tbl">
+<table>
+<tr><th>偏移</th><th>名字</th><th>做什麼</th></tr>
+<tr><td><code>+0x00</code></td><td><code>DR</code></td><td>Data Register。寫進去 = 送出一個字元</td></tr>
+<tr><td><code>+0x18</code></td><td><code>FR</code></td><td>Flag Register。bit5 <code>TXFF</code> = 送出佇列滿了</td></tr>
+<tr><td><code>+0x24</code></td><td><code>IBRD</code></td><td>鮑率除數的<strong>整數部</strong></td></tr>
+<tr><td><code>+0x28</code></td><td><code>FBRD</code></td><td>鮑率除數的<strong>小數部</strong>，單位 1/64</td></tr>
+<tr><td><code>+0x2c</code></td><td><code>LCR_H</code></td><td>Line Control Register (High)。bit4 <code>FEN</code> = FIFO enable；bits[6:5] <code>WLEN</code> = 一個字元幾個 bit</td></tr>
+<tr><td><code>+0x30</code></td><td><code>CR</code></td><td>Control Register。總開關</td></tr>
+</table>
+</div>
+
+<div class="callout">
+<span class="lbl">為什麼存取函式叫 <code>mmio_write<b>32</b></code>——我們不是 64 位元嗎</span>
+
+<p>因為<strong>「暫存器」這個詞在這裡指的是兩組完全不同的東西</strong>：</p>
+
+<div class="tbl" style="margin:12px 0">
+<table>
+<tr><th></th><th>住在哪</th><th>幾位元</th><th>例子</th></tr>
+<tr><td><strong>CPU 的通用暫存器</strong></td><td>CPU 核心裡面</td><td><strong>64</strong></td><td><code>x0</code>–<code>x30</code>、<code>sp</code>、<code>pc</code></td></tr>
+<tr><td><strong>裝置的控制暫存器</strong></td><td><strong>PL011 那顆晶片裡面</strong></td><td><strong>32</strong></td><td><code>DR</code>、<code>FR</code>、<code>IBRD</code>、<code>CR</code></td></tr>
+</table>
+</div>
+
+<p>「AArch64 是 64 位元」講的是<strong>第一組</strong>——那個認知完全正確，<code>x0</code> 確實是 64 個 bit。</p>
+
+<p>但 <strong>PL011 是掛在匯流排上的另一顆晶片</strong>，它裡面那些暫存器由它自己的設計決定，<strong>是 32 位元</strong>。兩組暫存器互不相干，只是名字都叫「暫存器」。</p>
+
+<h4>證據：一次讀 8 個 byte，讀到的是兩顆黏在一起</h4>
+
+<p><code>IBRD</code> 在 <code>0x09000024</code>、<code>FBRD</code> 在 <code>0x09000028</code>，中間差 4。實測：</p>
+
+<pre><code>分開讀，一次 4 bytes：
+  0x09000024 (IBRD) = 0xd
+  0x09000028 (FBRD) = 0x1
+
+從 0x09000024 一口氣讀 8 bytes：
+  0x09000024        = 0x<b>1</b>0000000<b>d</b>
+                        ↑        ↑
+                      FBRD     IBRD</code></pre>
+
+<p><strong>那不是「一顆 64 位元暫存器」，是兩顆 32 位元的排在一起。</strong> 如果 PL011 的暫存器真的是 64 位元，<code>IBRD</code> 和 <code>FBRD</code> 就不會只差 4 個 byte。</p>
+
+<h4>所以函式簽章裡兩種寬度都在</h4>
+
+<pre><code>void mmio_write32(<b>uintptr_t</b> addr, <b>uint32_t</b> value)
+                   ↑ 64 位元        ↑ 32 位元
+                   要 64 位元才裝    因為 PL011 的
+                   得下 AArch64      控制暫存器就是
+                   的位址            32 位元寬</code></pre>
+
+<p><strong>位址</strong>是 64 位元，因為它指的是 AArch64 的位址空間。<strong>資料</strong>是 32 位元，因為那顆硬體暫存器就這麼寬。</p>
+
+<h4>寫錯寬度，編譯器不會攔你</h4>
+
+<p>兩種都是合法的 C，差別只在產生哪一條指令：</p>
+
+<pre><code>*(volatile uint<b>64</b>_t *)0x09000024 = 0xd;   →  str <b>x</b>1, [x0]   寫 8 bytes ❌
+*(volatile uint<b>32</b>_t *)0x09000024 = 0xd;   →  str <b>w</b>1, [x0]   寫 4 bytes ✅</code></pre>
+
+<p>（<code>x1</code> 是 64 位元暫存器，<code>w1</code> 是<em>同一顆</em>的低 32 位元。）</p>
+
+<p>上面那條會把 <code>IBRD</code> 和<strong>隔壁的 <code>FBRD</code> 一起蓋掉</strong>——鮑率的小數部被清成 0，而<strong>沒有任何錯誤訊息</strong>。</p>
+
+<p><strong>記憶體你想寫幾位元都行；MMIO 的寬度是硬體規定的。</strong></p>
+
+<p>M4 的中斷控制器確實有 64 位元的裝置暫存器，那時才會需要 <code>mmio_write64</code>——<strong>到那時再加</strong>。</p>
+</div>
+
+<h3>開機時它們長什麼樣</h3>
+
+<p>用 GDB 在 <code>uart_init()</code> 執行<strong>之前</strong>讀：</p>
+
+<pre><code>CR    = 0x300     <span style="opacity:.6">bit8 TXE=1、bit9 RXE=1，但 bit0 UARTEN = 0</span>
+IBRD  = 0x0       <span style="opacity:.6">鮑率完全沒設</span>
+FBRD  = 0x0
+LCR_H = 0x0       <span style="opacity:.6">字元長度沒設</span>
+FR    = 0x90      <span style="opacity:.6">bit7 TXFE（送出佇列空）=1、bit4 RXFE（接收佇列空）=1</span></code></pre>
+
+<p><strong><code>UARTEN = 0</code>，這台 UART 標示為「沒有啟用」。</strong> 記住這一點，第 8 節會用到。</p>
+
+<h2 id="s5"><span class="num">5</span>鮑率：一個除法拆成兩個暫存器</h2>
+
+<p><strong>鮑率</strong>（baud rate）= 一秒送幾個 bit。兩端要講好，不然收到的是亂碼。</p>
+
+<p>UART 拿到一個固定時脈，內部先除以 16，再除以我們給的除數：</p>
+
+<pre><code>divisor = 時脈 / (16 × 鮑率)
+        = 24,000,000 / (16 × 115200)
+        = 13.0208</code></pre>
+
+<p><strong>13 太慢、14 太快。</strong> 所以硬體把除數拆成兩半，用「13 又 1/64」來逼近：</p>
+
+<pre><code>IBRD = 13                        整數部
+FBRD = round(0.0208 × 64) = 1    小數部，單位 1/64</code></pre>
+
+<p>實際跑出來的鮑率是 <code>24e6 / (16 × (13 + 1/64)) = 115246.1</code>，誤差 <strong>+0.04%</strong>。UART 容許約 ±2%，很穩。</p>
+
+<div class="callout">
+<span class="lbl">寫 <code>LCR_H</code> 才會「鎖上」鮑率</span>
+<p>寫進 <code>IBRD</code> 和 <code>FBRD</code> 的值<strong>不會立刻生效</strong>。PL011 是在你寫 <code>LCR_H</code> 的那一刻，才把那兩個值一起搬進真正在用的內部暫存器——這個動作叫 <strong>latch</strong>（鎖存）。</p>
+<p>所以順序反了（先 <code>LCR_H</code> 再 <code>IBRD</code>／<code>FBRD</code>），鮑率就不會生效，而且<strong>沒有任何錯誤訊息</strong>——只是對方收到亂碼。</p>
+<p>（<strong>TRM</strong> = Technical Reference Manual，晶片廠給的技術參考手冊。PL011 的是 ARM DDI 0183。上面這條規則就寫在裡面。）</p>
+</div>
+
+<h3>程式碼裡那個 <code>4</code> 是哪來的</h3>
+
+<p>與其分別算整數部和小數部，不如<strong>整個除數都用 1/64 當單位</strong>，只做一次除法：</p>
+
+<pre><code>64 × divisor = 64 × 時脈 / (16 × 鮑率)
+             = (64/16) × 時脈 / 鮑率
+             = <b>4</b> × 時脈 / 鮑率</code></pre>
+
+<p><code>64/16 = 4</code>。所以 <code>div64 = 4 × clk / baud</code>，然後 <code>IBRD = div64 / 64</code>、<code>FBRD = div64 % 64</code>。</p>
+
+<div class="callout">
+<span class="lbl">這個寫法順手解掉一個進位問題</span>
+<p>如果分開算，小數部四捨五入後可能變成 <strong>64</strong> —— 那會溢出 <code>FBRD</code> 只有 6 位元的欄位，寫進去變成 0，鮑率整個跑掉。</p>
+<p>用同一個值除／取餘就不會：<code>div64</code> 到了 64 的倍數，<code>IBRD</code> 自己加一、<code>FBRD</code> 自己歸零。<strong>兩個暫存器從同一個數字推出來，進位是免費的。</strong></p>
+</div>
+
+<h3>一個我原本寫錯的地方</h3>
+
+<p>第一版寫的是 <code>div64 = clk * 4 / baud</code> —— 那是<strong>無條件捨去</strong>，而 TRM 說的是<strong>四捨五入</strong>。</p>
+
+<p>在 QEMU 上兩者結果一樣，所以看不出來。但換到樹莓派 4 的時脈就分岔了：</p>
+
+<p><strong>差別多常出現？</strong> 掃 1–100 MHz、每 0.5 MHz 算一次（鮑率固定 115200）：<strong>199 個時脈裡有 100 個會分岔</strong>——大約一半。</p>
+
+<div class="tbl">
+<table>
+<tr><th>時脈</th><th>捨去（第一版）</th><th>四捨五入（TRM）</th></tr>
+<tr><td>24 MHz</td><td><code>(13, 1)</code></td><td><code>(13, 1)</code> 相同</td></tr>
+<tr><td>3 MHz</td><td><code>(1, 40)</code></td><td><code>(1, 40)</code> 相同</td></tr>
+<tr><td>7.3728 MHz</td><td><code>(4, 0)</code></td><td><code>(4, 0)</code> 相同</td></tr>
+<tr><td>48 MHz</td><td><code>(26, 2)</code></td><td><code>(26, 3)</code> <strong>差一格</strong></td></tr>
+<tr><td>9 MHz</td><td><code>(4, 56)</code></td><td><code>(4, 57)</code> <strong>差一格</strong></td></tr>
+</table>
+</div>
+
+<p>所以<strong>不是 48 MHz 特別倒楣，是 24 MHz 剛好躲過</strong>——而 24 MHz 正好是這個專案唯一驗得到的那一個。</p>
+
+<div class="callout myth">
+<span class="lbl">「那我在 M2 的時候怎麼會知道樹莓派是 48 MHz？」</span>
+<p><strong>你不會知道。</strong> 這個專案現在沒有任何東西能告訴你——<code>make dtb</code> 問到的是 QEMU 的 24 MHz，手上也沒有實機。</p>
+<p>M2 能自己驗證的，是<strong>跟平台無關</strong>的那一半：「這個寫法是捨去，TRM 說的是四捨五入，兩者在約一半的時脈上不同」。上面那張表全部是本機算的，一個硬體都不需要。</p>
+<p>「48 MHz」是<strong>以文件為準</strong>的補充——樹莓派韌體 <code>init_uart_clock</code> 的預設值，<strong>本專案尚無實機可驗</strong>，而且 <code>config.txt</code> 改得動它。它在這裡的角色只是「一個真實存在的分岔例子」，不是論證的基礎。把它換成 9 MHz，結論一模一樣。</p>
+<p><strong>這正是這個專案兩種引用要分開標的原因</strong>：實測的寫數值與量法，文件的只寫「文件說什麼、還沒驗」。混在一起，讀者會以為整段都驗過了。</p>
+</div>
+
+<p>誤差 0.04% 對 UART 無害，所以捨去版不是 bug —— 但註解不該讓人以為它是標準算法。</p>
+
+<p>改成整數形式的四捨五入：</p>
+
+<pre><code>div64 = (clk * 8 / baud + 1) / 2</code></pre>
+
+<p>（<code>×8</code> 再 <code>+1</code> 除以 2，就是 <code>×4</code> 之後 <code>+0.5</code> 取整。）</p>
+
+<h2 id="s6"><span class="num">6</span>三個設計選擇</h2>
+
+<h3>位址放 <code>platform.h</code></h3>
+
+<pre><code>QEMU virt      PL011 @ 0x0900_0000    時脈 24 MHz（device tree 寫死）
+樹莓派 4        PL011 @ 0xFE20_1000    時脈由韌體決定</code></pre>
+
+<p><strong>同一份驅動邏輯，只有位址不同。</strong> 集中在一個檔案，M9 就是新增一份 <code>platform.h</code>。</p>
+
+<div class="callout myth">
+<span class="lbl">但「驅動完全不用改」是句過頭的話</span>
+<p>移植到 Pi 4 至少還有兩件事不在驅動裡：</p>
+<ul>
+<li><strong>GPIO 腳位 muxing</strong>：晶片上的接腳不夠用，所以同一根腳可以「切換」成不同功能——UART、I2C、SPI、或單純的開關。這個切換叫 <strong>muxing</strong>（multiplexing，多工），每種功能有個編號叫 <strong>ALT0</strong>、<code>ALT1</code>⋯。BCM2711 的 GPIO 14/15 預設不是 UART，要設成 <code>ALT0</code> 才會真的接到腳位上。不做的話 —— 驅動一切正常，畫面全黑。</li>
+<li><strong>時脈不是固定值</strong>：Pi 4 的 PL011 時脈由韌體（<code>config.txt</code> 的 <code>init_uart_clock</code>）決定，不像 QEMU 這樣寫在 device tree 裡。所以第 5 節那個「48 MHz」是<strong>韌體預設值</strong>，不是硬體常數——<code>platform.h</code> 的 <code>UART0_CLK_HZ</code> 到 M9 要填什麼，得上板量過才知道。</li>
+</ul>
+<p>第一版的註解寫「the driver itself must not need editing」，讀起來像「改三個數字就好」。改成有提到這兩件事 —— <strong>一個看起來完整的抽象層，比一個明說有缺口的抽象層危險。</strong></p>
+</div>
+
+<h3><code>\n</code> 的轉換放在 <code>uart_putc</code>，不放 <code>uart_puts</code></h3>
+
+<p>終端機收到 <code>\n</code>（換行）只會往下移一行，<strong>不會回到最左邊</strong>。要回最左邊得送 <code>\r</code>（歸位）。少了它，第二行會從第一行結尾的位置開始，畫面變成階梯狀。</p>
+
+<p>第一版把轉換寫在 <code>uart_puts</code> 裡，結果是：</p>
+
+<pre><code>uart_puts("\n")   →  0d 0a   ✅
+uart_putc('\n')   →  0a      ❌ 裸的換行</code></pre>
+
+<p><strong>下一包就會撞到</strong> —— <code>printf</code> 幾乎一定是逐字元呼叫 <code>uart_putc</code>，那時 <code>printf("...\n")</code> 就會輸出裸 LF，而症狀看起來像「終端機壞了」。</p>
+
+<p>所以轉換搬進 <code>uart_putc</code>，讓它成為<strong>唯一出口</strong>；真正寫暫存器的 <code>uart_putc_raw()</code> 藏在後面。</p>
+
+<h3><code>RXE</code> 沒有寫進去</h3>
+
+<p><code>CR</code> 只設了 <code>UARTEN | TXE</code>，沒有 <code>RXE</code>（接收啟用）。</p>
+
+<p>因為<strong>現在沒有任何東西會讀</strong> —— 沒有 <code>uart_getc()</code>、沒有中斷。輸入 echo 是 M2 的第四包，那個 commit 自然會帶來加它的理由。</p>
+
+<p>所以實測 <code>CR = 0x101</code>，不是 <code>0x301</code>。</p>
+
+<h2 id="s7"><span class="num">7</span>C 語言：這些寫法為什麼是這樣</h2>
+
+<p>M2 是第一個有 C 的里程碑，也是第一個有標頭檔的。這一節把新出現的 C 寫法一次講完——<strong>每一條都對應到 <code>include/</code> 或 <code>drivers/</code> 裡真的存在的一行</strong>。</p>
+
+<h3>標頭檔：<code>#ifndef</code> 三行是幹嘛的</h3>
+
+<pre><code>#ifndef MMIO_H      <span style="opacity:.6">如果還沒定義過 MMIO_H</span>
+#define MMIO_H      <span style="opacity:.6">就定義它</span>
+...
+#endif</code></pre>
+
+<p>叫 <strong>include guard</strong>（引入守衛）。<code>#include</code> 是純文字貼上，同一個檔被貼兩次就會「函式重複定義」而編譯失敗。有了守衛，第二次進來時 <code>MMIO_H</code> 已存在，整段跳過。</p>
+
+<div class="callout myth" style="margin-top:14px">
+<span class="lbl">但這個專案現在拿掉守衛也不會爆</span>
+<p>實測把三個標頭的 <code>#ifndef</code> 全部刪掉，<code>pl011.c</code> 和 <code>start.c</code> 照樣零警告編過——因為<strong>三個標頭互不 include，目前沒有任何一條會繞回同一個檔的路徑</strong>。</p>
+<p>它現在是「便宜的保險」，不是「拿掉會壞的東西」。真正需要它的那天是：某個標頭開始 include 另一個標頭。M2 的下一包（<code>lib/string.c</code>）大概就會是那天。</p>
+</div>
+
+<h3><code>&lt;stdint.h&gt;</code> 和 <code>"mmio.h"</code> 的差別</h3>
+
+<div class="tbl">
+<table>
+<tr><th>寫法</th><th>去哪找</th></tr>
+<tr><td><code>#include &lt;stdint.h&gt;</code></td><td>系統路徑</td></tr>
+<tr><td><code>#include "mmio.h"</code></td><td><strong>先找原始檔自己的目錄</strong>，再走 <code>-I</code></td></tr>
+</table>
+</div>
+
+<div class="callout myth">
+<span class="lbl">這個順序咬過我一次</span>
+<p>做 <code>lab/m2</code> 的「拿掉 volatile」對照組時，我只加了 <code>-I</code> 指向改過的 <code>mmio.h</code>。結果原始檔還放在原本的目錄，<code>#include "mmio.h"</code> <strong>先找到隔壁那份有 volatile 的</strong>——實驗安靜地測到了錯的東西，而且結果看起來像個真實的結論（「編譯器沒刪嘛」）。</p>
+<p>正解是把原始檔也複製到改過的標頭旁邊。<code>lab/m2/run.sh</code> 的 <code>novol()</code> 現在這樣做，註解也寫了理由。</p>
+</div>
+
+<div class="callout">
+<span class="lbl">明明 <code>-nostdlib</code>，為什麼能用 <code>&lt;stdint.h&gt;</code>？</span>
+<p>因為它是 <strong>freestanding 標頭</strong>。即使沒有標準函式庫，編譯器也必須提供這幾個：</p>
+<pre style="margin:10px 0"><code>stdint.h   stddef.h   stdarg.h   stdbool.h   limits.h
+float.h    iso646.h   stdalign.h stdnoreturn.h</code></pre>
+<p>（C99 是前七個，C11 多了最後兩個。本專案用的是 gcc 預設的 <strong>C17</strong>，所以九個都能用。）</p>
+<p>關鍵是<strong>它們只有型別和巨集，沒有任何函式</strong>——不需要任何東西被連結進來。</p>
+<p><code>memcpy</code> 就不一樣了。但它<strong>不是編不過</strong>——<code>#include &lt;string.h&gt;</code> 照樣過，因為交叉編譯器的搜尋路徑上有 glibc 的標頭。<strong>它死在連結</strong>：</p>
+<pre style="margin:10px 0 0"><code>undefined reference to `memcpy'</code></pre>
+</div>
+
+<div class="callout">
+<span class="lbl">先分清楚三個很像的詞</span>
+<div class="tbl" style="margin:10px 0">
+<table>
+<tr><th></th><th>標準怎麼說</th><th>後果</th></tr>
+<tr><td><strong>未定義行為</strong><br><span style="opacity:.7">undefined behavior</span></td><td><strong>完全不管</strong>會發生什麼</td><td>可能「看起來正常」、可能當掉、可能編譯器整段刪掉。<em>今天正常不代表明天正常</em></td></tr>
+<tr><td><strong>實作定義</strong><br><span style="opacity:.7">implementation-defined</span></td><td>各平台自己決定，<strong>但必須講清楚</strong></td><td>可預測，只是換平台會變。例如 <code>char</code> 有沒有號</td></tr>
+<tr><td><strong>違反約束</strong><br><span style="opacity:.7">constraint violation</span></td><td>不合法，<strong>編譯器必須出診斷</strong></td><td>會有警告或錯誤——前提是你有開對旗標</td></tr>
+</table>
+</div>
+<p><strong>「未定義行為」最容易誤會的地方是：它不保證會出事，也不保證不會。</strong> 下面那個 <code>1 &lt;&lt; 31</code> 在這台機器上乖乖給你 <code>0x80000000</code>——但那是運氣，不是保證。</p>
+</div>
+
+<h3><code>uintptr_t</code>：為什麼不用 <code>void *</code></h3>
+
+<pre><code>static inline void mmio_write32(uintptr_t addr, uint32_t value)</code></pre>
+
+<p><code>uintptr_t</code> 是「<strong>大到能裝下一個指標的整數型別</strong>」，AArch64 上是 64 位元。</p>
+
+<p>用整數而不是指標，是因為我們拿到的<strong>本來就是一個數字</strong>，而且要對它做算術：</p>
+
+<pre><code>mmio_write32(UART0_BASE + UART_CR, 0);
+             <span style="opacity:.6">↑ 0x09000000 + 0x30，這是整數加法</span></code></pre>
+
+<p>如果參數宣告成 <code>void *</code>，<code>+ 0x30</code> 在標準 C 裡是<strong>違反約束</strong>（constraint violation）——標準要求編譯器出診斷訊息。GCC 把它當擴充功能，<strong>而且預設一句話都不說</strong>：</p>
+<pre><code>-Wall -Wextra -Werror        <span style="opacity:.6">完全沉默</span>
+-pedantic                    <span style="opacity:.6">warning: pointer of type 'void *' used in arithmetic</span>
+-pedantic-errors             <span style="opacity:.6">error</span></code></pre>
+<p><strong>「違反約束」和「未定義行為」不一樣</strong>：前者標準要求編譯器<em>告訴你</em>，後者標準完全不管會發生什麼。這裡是前者，只是我們沒開 <code>-pedantic</code>，所以沒人告訴我們。</p>
+
+<h3><code>*(volatile uint32_t *)addr</code> 怎麼念</h3>
+
+<p>由內往外拆：</p>
+
+<pre><code>addr                        <span style="opacity:.6">一個 64 位元整數</span>
+(uint32_t *)addr            <span style="opacity:.6">把它當成「指向 32 位元的指標」</span>
+(volatile uint32_t *)addr   <span style="opacity:.6">而且那個目標是 volatile</span>
+*(volatile uint32_t *)addr  <span style="opacity:.6">去那個位址讀／寫</span></code></pre>
+
+<div class="callout myth">
+<span class="lbl"><code>volatile</code> 貼在星號哪一邊</span>
+<pre style="margin:10px 0"><code>volatile uint32_t *p    ← p <b>指向的東西</b>是 volatile   ✅ 我們要這個
+uint32_t * volatile p   ← <b>p 這個變數自己</b>是 volatile ⚠️ 保護錯對象</code></pre>
+<p><strong>星號左邊修飾「被指的東西」，右邊修飾「指標自己」。</strong> 寫錯的話編譯器不會抱怨——它是合法的 C。</p>
+<p>實測三種寫法，各連寫三次 <code>*p</code>，<code>-O2</code>：</p>
+<pre style="margin:10px 0"><code>volatile 在左（目標）    3 條 str   ✅ 正是我們要的
+volatile 在右（指標）    4 條 str   ← 沒少，但多了讀指標的雜務
+兩邊都沒有              1 條 str   ← 前兩次被合併掉了</code></pre>
+<p><strong>所以貼右邊不是「完全沒用」，是「用錯地方而恰好有副作用」</strong>：指標自己 volatile → 每次都得重新讀指標 → 目標也就跟著每次重讀。它靠副作用達成了目的，代價是多出來的指令，而且<strong>換個寫法（例如把指標存進區域變數）保證就沒了</strong>。</p>
+<p>依賴副作用得到的正確，跟寫對是兩件事。</p>
+</div>
+
+<h3><code>static inline</code> 放在標頭裡</h3>
+
+<p>先講<strong>為什麼會有這個處境</strong>。一般函式是「宣告放標頭、定義放 <code>.c</code>」：</p>
+
+<pre><code>mmio.h   void mmio_write32(uintptr_t, uint32_t);   <span style="opacity:.6">只是宣告</span>
+mmio.c   void mmio_write32(...) { ... }            <span style="opacity:.6">定義在這</span></code></pre>
+
+<p>但 <code>mmio_write32</code> 只有一行。為它開一個 <code>.c</code> 檔、還要付一次函式呼叫的代價，划不來。<strong>所以定義直接寫進標頭。</strong></p>
+
+<p>代價是：<code>#include</code> 是純文字貼上，<strong>那份定義會被複製到每一個 include 它的 <code>.c</code> 裡</strong>。兩個關鍵字各處理這個複製帶來的一個麻煩。</p>
+
+<h4>麻煩一：撞名 → <code>static</code> 解決</h4>
+
+<pre><code>pl011.c  貼一份 mmio_write32
+uart2.c  貼一份 mmio_write32
+連結器： multiple definition of 'mmio_write32'   ❌</code></pre>
+
+<p><code>static</code> 的意思是<strong>「這一份只有我這個 <code>.c</code> 看得到」</strong>，於是兩份各自獨立，不會撞。</p>
+
+<p>代價是真的產生兩份程式碼——但函式這麼小，<code>-O2</code> 會展開掉，代價是零。</p>
+
+<h4>麻煩二：沒用到會被唸 → <code>inline</code> 解決</h4>
+
+<p>這才是 <code>inline</code> 在這裡的真正作用，<strong>跟「展開比較快」無關</strong>。</p>
+
+<p>標頭被貼進每個 <code>.c</code>。如果某個 <code>.c</code> 只寫不讀，<code>mmio_read32</code> 就成了「定義了卻沒人用的 <code>static</code> 函式」。實測同一份程式碼，只換旗標：</p>
+
+<pre><code>（什麼都不加）    編過，一句話都沒說
+-Wall             編過，但有警告
+                  warning: 'r32' defined but not used [-Wunused-function]
+-Wall -Werror     ❌ 建置失敗
+                  error: 'r32' defined but not used [-Werror=unused-function]</code></pre>
+
+<div class="callout">
+<span class="lbl"><code>-Werror</code> 沒有做任何新檢查</span>
+<p>它只是<strong>把所有警告升級成錯誤</strong>。上面三行的訊息文字幾乎一樣，只有 <code>warning</code> 變成 <code>error</code>。</p>
+<p>所以完整的因果鏈有三段：</p>
+<pre style="margin:10px 0 0"><code>1. 定義在標頭      →  每個 .c 都貼一份
+2. 某個 .c 沒用到  →  -Wall 裡的 -Wunused-function 出來唸
+3. 我們有 -Werror  →  唸變成擋</code></pre>
+<p style="margin-top:10px"><strong>三段裡拿掉任何一段，建置都會過。</strong> <code>inline</code> 是在斷第 2 段——它等於跟編譯器說「這函式住在標頭裡，沒人用是正常的」。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">但今天拿掉 <code>inline</code> 也不會壞</span>
+<pre style="margin:10px 0"><code>誰 include 了 mmio.h：  只有 drivers/uart/pl011.c
+它用到 mmio_write32：  6 次
+它用到 mmio_read32：   1 次
+
+把 static inline 改成 static，整個核心重編  →  exit 0</code></pre>
+<p><strong>只有一個檔 include，而且兩個函式都用到了</strong>，所以第 2 段觸發不了。</p>
+<p>照鐵則五的判準，<code>inline</code> 現在不是承重的。但它離承重只差一步——<strong>下一個 include <code>mmio.h</code> 卻只寫不讀的 <code>.c</code> 出現，建置就會斷</strong>。M2 的下一包 <code>lib/</code> 很可能就是。</p>
+</div>
+
+<h4>三種寫法的下場</h4>
+
+<div class="tbl">
+<table>
+<tr><th>關鍵字</th><th>作用</th><th>不寫會怎樣</th></tr>
+<tr><td><code>static inline</code><br><span style="opacity:.7">我們用的</span></td><td>每個 <code>.c</code> 各自一份，不對外公開；建議展開</td><td>—</td></tr>
+<tr><td><strong>兩個都不寫</strong></td><td>一個普通的全域函式</td><td>兩個 <code>.c</code> include 同一個標頭 → <code>multiple definition of 'mmio_write32'</code></td></tr>
+<tr><td><strong>只寫 <code>inline</code></strong></td><td>——</td><td><code>-O0</code> 下 <strong>連結失敗</strong>：<code>undefined reference to 'mmio_write32'</code></td></tr>
+</table>
+</div>
+
+<p>最後那一列是重點：<strong><code>inline</code> 單獨用，是給「另有一份外部定義」的情況準備的</strong>。編譯器可以選擇不展開，那時就得去找那份外部定義——而我們沒有，於是連結器找不到。</p>
+
+<p>這就是為什麼慣用寫法是 <code>static inline</code>：<code>static</code> 保證每個 <code>.c</code> 都有自己的一份，<strong>展不展開都不會缺人</strong>。</p>
+
+<div class="callout myth">
+<span class="lbl">而且那一列是 <code>-O</code> 相依的</span>
+<p><code>-O2</code> 下同一份程式碼<strong>連結得過</strong>——因為編譯器真的展開了，根本不需要那份外部定義。</p>
+<p>所以「只寫 <code>inline</code> 會壞」這句話，只在 <code>-O0</code> 成立。這正是第 10 節精髓第 2 條說的：<strong>「拿掉它現在會壞嗎」要連編譯旗標一起問。</strong></p>
+</div>
+
+<h4>順帶：<code>inline</code> 對「要不要展開」真的只是建議</h4>
+
+<p>實測 <code>-O0</code> 下它完全沒展開——<code>mmio_write32</code> 變成一個真的函式，而且是這樣：</p>
+
+<pre><code>&lt;mmio_write32&gt;:
+    sub  sp, sp, #0x10      <span style="opacity:.6">挖 16 bytes</span>
+    str  x0, [sp, #8]       <span style="opacity:.6">把參數存到堆疊</span>
+    str  w1, [sp, #4]
+    ldr  x0, [sp, #8]       <span style="opacity:.6">⋯又立刻讀回來</span>
+    ldr  w1, [sp, #4]
+    str  w1, [x0]           <span style="opacity:.6">★ 只有這條真的碰硬體</span>
+    nop
+    add  sp, sp, #0x10
+    ret</code></pre>
+
+<p><strong>九條指令，八條是雜務。</strong> 存下去又馬上讀回來，純粹因為 <code>-O0</code> 不做任何優化。<code>-O2</code> 下整個函式會被展開成那一條 <code>str</code>。</p>
+
+<h3><code>(1u &lt;&lt; 5)</code>：那個 <code>u</code> 和那對括號</h3>
+
+<pre><code>#define FR_TXFF   (1u &lt;&lt; 5)</code></pre>
+
+<p><strong><code>u</code>：</strong> <code>1</code> 是有號 <code>int</code>，<strong>有號數左移到最高位是未定義行為</strong>（<code>1 &lt;&lt; 31</code>）。我們現在最多移 8 位（<code>CR_TXE</code>）還安全，但旗標是位元樣式、不是數量，本來就該用無號。</p>
+
+<p><strong>括號：</strong> 這條我第一版寫反了，值得留下來。</p>
+
+<p>直覺會說「少了括號，<code>x &amp; FR_TXFF</code> 會變成 <code>(x &amp; 1u) &lt;&lt; 5</code>」。<strong>實測不是。</strong></p>
+
+<pre><code>#define M_NOPAR 1u &lt;&lt; 5
+#define M_PAR  (1u &lt;&lt; 5)
+
+x &amp; M_NOPAR      →  and   w0, w0, #0x20   ┐ 完全一樣
+x &amp; M_PAR        →  and   w0, w0, #0x20   ┘
+(x &amp; 1u) &lt;&lt; 5    →  ubfiz w0, w0, #5, #1  ← 這是另一回事</code></pre>
+
+<p><strong><code>&lt;&lt;</code> 的優先序<em>高於</em> <code>&amp;</code></strong>，所以 <code>x &amp; 1u &lt;&lt; 5</code> 本來就等於 <code>x &amp; (1u &lt;&lt; 5)</code>。位元遮罩這個用法，加不加括號都對。</p>
+
+<p><strong>括號真正救到的是加減法</strong>——它們的優先序比 <code>&lt;&lt;</code> 高：</p>
+
+<pre><code>M_NOPAR + 1   →   1u &lt;&lt; 5 + 1   →   1u &lt;&lt; 6   =  64   ❌
+M_PAR   + 1   →   (1u &lt;&lt; 5) + 1              =  33   ✅</code></pre>
+
+<div class="callout">
+<span class="lbl">但這個坑在本專案掉不進去</span>
+<p><code>-Wparentheses</code> 在 <code>-Wall</code> 裡，而我們有 <code>-Werror</code>：</p>
+<pre style="margin:10px 0"><code>error: suggest parentheses around '+' inside '&lt;&lt;' [-Werror=parentheses]</code></pre>
+<p>所以那個 64 <strong>不是會安靜發生的陷阱，是硬錯誤</strong>。真正救到的不是「我記得加括號」這個習慣，是 <code>-Wall -Werror</code>。</p>
+<p>（對照上面 <code>void *</code> 那條：同樣是「標準說不行」，那條在 <code>-Wall -Wextra -Werror</code> 下完全沉默，要 <code>-pedantic</code> 才叫。<strong>旗標管得到哪些、管不到哪些，沒有規律，只能一條一條試。</strong>）</p>
+</div>
+
+<p>所以規則還是「巨集內容用括號包起來」，但理由不是我原本寫的那個。<strong>「這條規則救了我」和「我知道它救了什麼」是兩件事</strong>——我照著規則寫對了程式碼，卻把理由講反了，直到有人去編一次才發現。</p>
+
+<p>（順帶：<code>#define UART_DR 0x00</code> 那六個沒有括號，因為<strong>單一 token 不可能被拆開</strong>。需要括號的是「裡面有運算子」的巨集。）</p>
+
+<h3><code>UL</code> 後綴：運算寬度由運算元決定</h3>
+
+<pre><code>#define UART0_CLK_HZ    24000000UL</code></pre>
+
+<p>規則是：<strong>運算的寬度由<em>運算元</em>決定，不是由你要存進去的變數決定。</strong></p>
+
+<pre><code>uint64_t x = a * b;    ← a、b 都是 32 位元的話，
+                          乘法照樣在 32 位元裡溢位，然後才把壞掉的結果放大</code></pre>
+
+<div class="callout myth">
+<span class="lbl">但這裡防溢位的不是 <code>platform.h</code> 的 <code>UL</code></span>
+<p>我原本以為是。實際的算式是：</p>
+<pre style="margin:10px 0"><code>UART0_CLK_HZ * <b>8UL</b> / UART0_BAUD</code></pre>
+<p><strong>那個 <code>8UL</code> 已經把整式拉到 64 位元了</strong>——只要有<em>一個</em>運算元是 <code>unsigned long</code>，另一邊就會被提升上去。</p>
+<p>實測：把 <code>platform.h</code> 的 <code>UL</code> 全部拿掉、時脈換成 600 MHz（會讓 32 位元溢位的量級）：</p>
+<pre style="margin:10px 0"><code>CLK_INT * 8UL / BAUD  →  20833   ✅ 正解，UL 拿掉也沒事
+CLK_INT * 8   / BAUD  →   2192   ❌ 兩邊都拿掉才壞
+                             warning: integer overflow … results in '505032704'</code></pre>
+<p><strong>所以 <code>platform.h</code> 的 <code>UL</code> 目前是備而不用的</strong>——它的價值在「下一個人抄這個巨集去寫別的算式」時才兌現。</p>
+<p>這一則的教訓不在 <code>UL</code>，在<strong>「我以為某個東西在保護我，但保護我的其實是別的地方」</strong>。要確認一個防護有沒有作用，只有一個方法：拿掉它，看會不會壞。</p>
+</div>
+
+<h3><code>(uint32_t)(unsigned char)c</code>：為什麼要兩層</h3>
+
+<pre><code>mmio_write32(UART0_BASE + UART_DR, (uint32_t)(unsigned char)c);</code></pre>
+
+<p><strong><code>char</code> 的正負號是實作定義的</strong>——C 標準沒有規定，各平台自己決定。</p>
+
+<p>如果 <code>char</code> 是有號的，<code>c = 0x80</code>（128）會被當成 −128，放大時做<strong>符號延伸</strong>：</p>
+
+<pre><code>(uint32_t)c                  →  0xFFFFFF80   ❌ 高位全變 1
+(uint32_t)(unsigned char)c   →  0x00000080   ✅</code></pre>
+
+<p>先轉 <code>unsigned char</code> 把符號問題斷掉，再放大。</p>
+
+<div class="callout">
+<span class="lbl">但在這台機器上兩者相同</span>
+<p>實測 AArch64 的 <code>char</code> 是<strong>無號</strong>的：<code>char c = -1; return c &lt; 0;</code> 編出來是 <code>mov w0, #0</code>——編譯器直接算出「不可能小於 0」。</p>
+<p>所以 <code>bad()</code> 和 <code>good()</code> 兩個函式編出來一模一樣，都是 <code>and w0, w0, #0xff</code> 加 <code>ret</code>。</p>
+<p><strong>那個轉型是為了可攜性，不是為了這台機器。</strong> 同一份程式碼搬到 x86（<code>char</code> 有號）就會分岔——而這種 bug 只在字元 ≥ 0x80 時才出現，通常是別人送中文進來的那天。</p>
+</div>
+
+<h3><code>while (...) { ; }</code>：那個孤獨的分號</h3>
+
+<pre><code>while (mmio_read32(UART0_BASE + UART_FR) &amp; FR_TXFF) {
+    ;
+}</code></pre>
+
+<p>迴圈體是空的——我們只是要一直讀到 <code>TXFF</code> 變 0。</p>
+
+<p>為什麼不寫 <code>while (...);</code>？因為那個分號<strong>看起來像打錯字</strong>：</p>
+
+<pre><code>while (cond);        <span style="opacity:.6">← 這是空迴圈，還是不小心多打一個分號？</span>
+    do_something();  <span style="opacity:.6">← 讀者會以為這行在迴圈裡</span></code></pre>
+
+<p>寫成 <code>{ ; }</code> 是明確表態：<strong>這裡故意什麼都不做</strong>。</p>
+
+<h3><code>*s++</code> 的優先序</h3>
+
+<pre><code>uart_putc(*s++);</code></pre>
+
+<p><strong><code>++</code> 綁得比 <code>*</code> 緊</strong>，所以它是 <code>*(s++)</code>：</p>
+
+<pre><code>1. 取 s 目前的值當作結果  →  傳給 *
+2. s 自己 +1
+3. 效果：讀出現在指的字元，然後指標往後移一格</code></pre>
+
+<p>寫成 <code>(*s)++</code> 意思完全不同——那是「把字元的值加一」。而 <code>uart_puts</code> 的參數是 <code>const char *s</code>，所以<strong>它根本編不過</strong>：</p>
+<pre><code>error: increment of read-only location '*s'</code></pre>
+<p><code>const</code> 在這裡把一個「要到 M5 開了 MMU 才會爆」的問題，提前到編譯期擋掉了。</p>
+
+<h3><code>const char *s</code>：<code>const</code> 在星號哪一邊</h3>
+
+<pre><code>const char *s     <span style="opacity:.6">內容唯讀，但 s 可以移動   ✅ 我們要這個</span>
+char * const s    <span style="opacity:.6">s 不能移動，但內容可以改</span></code></pre>
+
+<p><code>uart_puts</code> 裡有 <code>*s++</code>（移動指標），所以 <code>const</code> 必須在左邊。</p>
+
+<p>而且它讓呼叫端安全：<code>uart_puts("Hello")</code> 的字串在 <code>.rodata</code>，<code>const</code> 讓編譯器在 M5 之前就先擋下寫入。</p>
+
+<h3><code>void uart_init(void)</code>：那個 <code>(void)</code> 不能省</h3>
+
+<pre><code>void uart_init(void);    <span style="opacity:.6">明確說「沒有參數」</span>
+void uart_init();        <span style="opacity:.6">在 C 裡意思是「參數不詳」❌</span></code></pre>
+
+<p>C++ 兩者相同，<strong>C 不是</strong>。寫成 <code>()</code> 的話，<code>uart_init(1, 2, 3)</code> 也編得過，而且不會警告。</p>
+
+<h3><code>static</code> 在 C 裡有兩種意思</h3>
+
+<div class="tbl">
+<table>
+<tr><th>放在哪</th><th>意思</th><th>本專案的例子</th></tr>
+<tr><td><strong>檔案層級</strong></td><td>不對外公開，別的 <code>.c</code> 看不到</td><td><code>static void bump(void)</code></td></tr>
+<tr><td><strong>函式裡面</strong></td><td>這個區域變數的壽命是整個程式</td><td>（還沒用到）</td></tr>
+</table>
+</div>
+
+<p>同一個關鍵字，兩件事，看位置決定。<code>nm</code> 的大小寫就是在報第一種：</p>
+
+<pre><code>void kernel_main(void)               →  T kernel_main    <span style="opacity:.6">大寫，全域</span>
+static void bump(void)               →  t bump           <span style="opacity:.6">小寫，static</span>
+static unsigned long boot_counter;   →  b boot_counter</code></pre>
+
+<div class="callout">
+<span class="lbl"><code>kernel_main</code> 是唯一不能加 <code>static</code> 的</span>
+<p>因為 <code>boot.S</code> 要 <code>bl kernel_main</code>。組語看不到 C 的作用域規則，它靠<strong>連結器</strong>把名字配對起來——加了 <code>static</code>，那個名字就不會出現在全域符號表，連結會失敗。</p>
+<p><strong>這是 C 和組語唯一的接縫。</strong></p>
+</div>
+
+<h3>「沒初始化就用」為什麼在這裡沒問題</h3>
+
+<p><code>boot_counter</code> 沒給初始值，<code>bump()</code> 卻直接對它 <code>++</code>：</p>
+
+<pre><code>static unsigned long boot_counter;
+static void bump(void) { boot_counter++; }</code></pre>
+
+<p>「沒初始化就用」的警覺是對的，<strong>但那個直覺只適用於區域變數</strong>。C 把變數分成兩種「儲存期」，規則完全不同：</p>
+
+<div class="tbl">
+<table>
+<tr><th></th><th>誰</th><th>沒給初始值時</th><th><code>x++</code></th></tr>
+<tr><td><strong>自動儲存期</strong></td><td>函式裡的區域變數</td><td><strong>是垃圾</strong>（上一個人留在堆疊上的東西）</td><td>❌ 未定義行為</td></tr>
+<tr><td><strong>靜態儲存期</strong></td><td>全域變數、<code>static</code> 變數</td><td><strong>保證是 0</strong>（C 標準規定）</td><td>✅ 合法</td></tr>
+</table>
+</div>
+
+<p>編譯器自己就把兩者分開了。同一份程式碼，只有區域變數那個被唸：</p>
+
+<pre><code>unsigned long f_local(void)  { unsigned long x; x++; return x; }
+unsigned long f_static(void) { g_static++;      return g_static; }
+
+warning: 'x' is used uninitialized [-Wuninitialized]
+（g_static 一句話都沒說）</code></pre>
+
+<div class="callout myth">
+<span class="lbl">順便看一眼「未定義行為」長什麼樣</span>
+<p>那兩個函式編出來的指令差很多：</p>
+<pre style="margin:10px 0"><code>&lt;f_local&gt;:                  &lt;f_static&gt;:
+    mov x0, #0x1                ldr x0, [x1]     <span style="opacity:.6">真的去讀</span>
+    ret                         add x0, x0, #1
+                                str x0, [x1]     <span style="opacity:.6">真的寫回</span>
+                                ret</code></pre>
+<p><strong><code>f_local</code> 被編譯器直接算成 1。</strong> 反正那是垃圾值，它愛怎麼算都行——這就是未定義行為的樣子：<strong>不是當掉，是編譯器有權亂來</strong>。</p>
+<p><code>f_static</code> 則老老實實讀-加-寫，因為它知道那個值有意義。</p>
+</div>
+
+<h4>但那個「保證是 0」，在這裡是我們自己兌現的</h4>
+
+<p>C 標準規定靜態儲存期的變數要是 0。<strong>這是語言層面的通則，任何符合標準的實作都得做到。</strong> 但「<em>誰</em>去做」不是通則——每個平台不一樣：</p>
+
+<div class="tbl">
+<table>
+<tr><th>平台</th><th>誰把 <code>.bss</code> 清成 0</th></tr>
+<tr><td>Linux 上的一般程式</td><td>核心的 ELF 載入器</td></tr>
+<tr><td>有些嵌入式工具鏈</td><td>C 執行期啟動碼（<code>crt0</code>）</td></tr>
+<tr><td><strong>這個專案</strong></td><td><strong>沒有人——所以 <code>boot.S</code> 自己做</strong></td></tr>
+</table>
+</div>
+
+<h4>怎麼證明？兩個方向</h4>
+
+<p><strong>正面：那些 0 一定是執行時生出來的，不在檔案裡。</strong> 拿一個宣告了 8 MB <code>.bss</code> 的 Linux 程式來看：</p>
+
+<pre><code>執行檔大小 = 641,104 bytes
+.bss 大小  = 8,410,768 bytes   ← 比整個檔案還大，而且型別是 NOBITS</code></pre>
+
+<p>8 MB 的 0 沒有存在檔案裡（存了也是浪費）。所以<strong>一定有人在載入時把它生出來</strong>。</p>
+
+<p><strong>反面：把那個「人」拿掉，就不是 0 了。</strong> 這是我們自己做得到的實驗——把 <code>boot.S</code> 的清零迴圈整段刪掉，開機前先用 <code>-device loader</code> 把 <code>boot_counter</code> 塞成 <code>0xcafe1234</code>：</p>
+
+<pre><code>有清零迴圈   進 kernel_main 時 boot_counter = <b>0x0</b>
+拿掉迴圈     進 kernel_main 時 boot_counter = <b>0xcafe1234</b></code></pre>
+
+<p><strong>這證明它不是自動的。</strong> C 的保證是真的，但在裸機上是我們自己實現的——少了那 6 行組語，<code>boot_counter++</code> 就變成「把一個垃圾值加一」，跟區域變數的情況一模一樣。</p>
+
+<p>這也是為什麼 <code>make debug</code> 要檢查它：<strong>它是那個保證有沒有被兌現的唯一證據。</strong></p>
+
+<h3>沒給初始值 → <code>.bss</code>；給了非零 → <code>.data</code></h3>
+
+<p>實測三種寫法落在哪：</p>
+
+<pre><code>static unsigned long a;      →  nm 顯示 b   <span style="opacity:.6">.bss</span>
+static unsigned long b = 0;  →  nm 顯示 b   <span style="opacity:.6">.bss（明著寫 0 也一樣）</span>
+static unsigned long c = 7;  →  nm 顯示 d   <span style="opacity:.6">.data</span></code></pre>
+
+<p><strong>C 保證未初始化的全域變數是 0</strong>，所以 <code>= 0</code> 是多餘的，編譯器一樣放 <code>.bss</code>（只記大小，不存內容）。</p>
+
+<p>只有給非零初始值才會進 <code>.data</code>——那時檔案裡真的要存那個數字。這就是為什麼連結器腳本的註解說「目前還沒有 <code>.data</code>」：整個核心沒有任何全域變數給了非零初始值。</p>
+
+<div class="callout myth">
+<span class="lbl">同一個 <code>volatile</code> 的道理，<code>start.c</code> 還沒套用</span>
+<p>這一節花了很多篇幅講 <code>volatile</code> 對 MMIO 為什麼必要。但 <code>start.c</code> 裡那個 <code>boot_counter</code> <strong>沒有 <code>volatile</code></strong>，而它是 <code>make debug</code> 用來證明「<code>.bss</code> 被清了」的唯一證據。</p>
+<p>實測用 <code>-O2</code> 重編整個核心：</p>
+<pre style="margin:10px 0"><code>&lt;kernel_main&gt;:            <span style="opacity:.6">（略去序言兩條與位址運算）</span>
+    bl   uart_init
+    bl   uart_puts
+    b    .                  <span style="opacity:.6">← 死迴圈，就這樣</span>
+
+nm | grep -E 'boot_counter|bump'   →  <b>零個結果</b></code></pre>
+<p><strong>變數和函式連符號都不存在了。</strong> 編譯器的推論完全正確：<code>boot_counter</code> 是 <code>static</code>（外面看不到）、只被加一從來沒被讀、所以整條計算是死的，連同 <code>bump()</code> 一起刪掉。</p>
+<p>那一天 <code>make debug</code> 的第三個檢查會變成這樣（實跑 <code>-O2</code> 版本量到的）：</p>
+<pre style="margin:10px 0"><code>SP        = $1 = 0x40010200
+EL        = $2 = 1
+bss 清了嗎 = No symbol table is loaded.  Use the "file" command.</code></pre>
+<p><strong>不是壞掉，是證據消失。</strong> 前兩行照樣正確，只有第三行沉默地失去意義。</p>
+<p>照鐵則五的判準，現在（<code>-O0</code>）加 <code>volatile</code> 不會改變任何指令，所以還不該加。但這是一則<strong>已經寫在牆上的預告</strong>：真的開 <code>-O2</code> 的那個 commit，除了 <code>mmio.h</code> 之外，還得處理這個見證變數。</p>
+</div>
+
+<h2 id="s8"><span class="num">8</span>被推翻的直覺</h2>
+
+<div class="callout myth">
+<span class="lbl">直覺 1</span>
+<p><strong>「UART 要先初始化才能用」</strong></p>
+<p>在 QEMU 上<strong>完全不用</strong>。實測：寫一支只做 <code>uart_puts()</code>、完全不呼叫 <code>uart_init()</code> 的核心 —— 字元照樣全部出來。</p>
+<p>而且開機時的狀態是「<code>UARTEN = 0</code>、鮑率沒設、字元長度沒設」。<strong>一台標示為關閉、沒有設定鮑率的 UART，照樣把字送出去了。</strong></p>
+<p>因為 QEMU 的 PL011 模型只是把位元組轉交給宿主機的終端機，那些設定它一個都不看。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 2 —— 這一則是本節的重點</span>
+<p><strong>「<code>volatile</code> 是防止編譯器把重複的寫入合併成一次」</strong></p>
+<p>方向對，但實際發生的事更狠。拿掉 <code>volatile</code>、用 <code>-O2</code> 編，數一下 <code>uart_init()</code> 裡的 <code>str</code>：</p>
+<pre style="margin:10px 0"><code>-O0  有 volatile   1 條   <span style="opacity:.6">（呼叫 mmio_write32，沒展開）</span>
+-O0  無 volatile   1 條   <span style="opacity:.6">完全一樣</span>
+-O2  有 volatile   5 條   <span style="opacity:.6">五次寫入都在</span>
+-O2  無 volatile   <b>4 條</b>  <span style="opacity:.6">少了一條</span></code></pre>
+<p><strong>少的那一條是 <code>CR = 0</code>。</strong> 編譯器看到 <code>CR</code> 被寫兩次（先 0、後 <code>0x101</code>），把第一次當成<strong>死存取</strong>（dead store——寫進去之後、還沒有人讀就被蓋掉的一次寫入）刪掉了：</p>
+<pre style="margin:10px 0"><code>-O2、無 volatile 的 uart_init：
+    str  w7, [x6]     ; IBRD = 13
+    str  w5, [x4]     ; FBRD = 1
+    str  w3, [x2]     ; LCR_H = 0x70
+    str  w1, [x0]     ; CR = 0x101
+    ret
+                      ← 「先關掉 UART」那一步整條不見了</code></pre>
+<p>而那正是註解裡宣稱「保護飛行中的字元」的那一行。<strong>編譯器把安全措施刪掉了，而且 QEMU 上照樣印出 Hello。</strong></p>
+<p>兩個教訓：一，<code>volatile</code> 不是為了現在，是為了 <code>-O2</code>（<code>PROJECT_PLAN</code> 有規定，Makefile 還沒設）。二，<strong>「拿掉它現在會壞嗎」這個判準要連編譯旗標一起問</strong> —— 同一段程式碼在 <code>-O0</code> 和 <code>-O2</code> 下是兩個不同的答案。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 3</span>
+<p><strong>「<code>clk * 4 / baud</code> 就是 TRM 的算法」</strong></p>
+<p>不是，那是無條件捨去，TRM 是四捨五入。24 MHz 剛好相同，<strong>48 MHz（Pi 4）差一格</strong>。細節在第 5 節。</p>
+<p>值得記住的是<strong>它為什麼躲過檢查</strong>：唯一能驗證的平台剛好是兩種算法一致的那個。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 4</span>
+<p><strong>「M1 的 <code>ALIGN(16)</code> 擋住了孤兒節插隊」</strong></p>
+<p>M1 的連結器腳本註解說：把 <code>__bss_start</code> 寫在 <code>.bss { }</code> 外面，ld 會把孤兒節（<code>.eh_frame</code>）塞進符號和區段之間，清零迴圈就會抹掉它。</p>
+<p><strong>照字面做重現不出來。</strong> 實測（binutils 2.38，M1 當時的原始碼）：</p>
+<pre style="margin:10px 0"><code>符號在大括號內              __bss_start = 0x400000f0   安全
+符號移到外面，保留 ALIGN     __bss_start = 0x400000f0   還是安全
+符號移到外面，拿掉 ALIGN     __bss_start = 0x400000a4   ← .eh_frame 在 0x400000a8，被夾住了</code></pre>
+<p><strong>要兩個條件同時成立才會出事，而註解只寫了一個。</strong></p>
+<p>更值得記住的是：那個 <code>ALIGN(16)</code> 是為了「讓清零迴圈一次寫 16 bytes 不留零頭」而寫的，它擋住孤兒節<strong>純屬意外</strong>。一個為了 A 而寫的東西，剛好也擋住了不相干的 B —— 這種「靠巧合正確」的程式碼，會在某天加了一個新區段之後突然壞掉。</p>
+<p>（M2 就加了新區段：<code>.rodata</code>。加進腳本之後，孤兒節的位置又變了。）</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">直覺 5</span>
+<p><strong>「同樣的原始碼建兩次，產出應該一模一樣，所以 md5 相同代表沒重建」</strong></p>
+<p>錯。實測連續建兩次，md5 就不同 —— 差 6 個 byte。</p>
+<p>位置在 <code>.strtab</code>（string table，ELF 裡存放所有符號名字的那一區）。gcc 編譯時會產生暫存的 <code>.o</code> 檔，檔名每次都不一樣（<code>ccGWRvg.o</code>、<code>cc3aNwQx.o</code>⋯），而那個名字會以一個 <strong><code>STT_FILE</code></strong> 型別的符號（ELF 用來記錄「這段東西來自哪個原始檔」）留在符號表裡。</p>
+<p>所以「md5 沒變」<strong>不能</strong>用來證明沒重建。反向仍可靠：md5 變了不代表真的重建了。要驗「有沒有重建」，看 <code>make</code> 的輸出有沒有跑編譯指令比較準。</p>
+</div>
+
+<h2 id="s9"><span class="num">9</span>實測數據</h2>
+
+<p>量於 binutils 2.38 / gcc 11.4.0 / QEMU 6.2.0 / gdb 12.1（Ubuntu 22.04）。</p>
+
+<h3><code>uart_init()</code> 前後</h3>
+
+<div class="tbl">
+<table>
+<tr><th></th><th>之前</th><th>之後</th><th>寫進去的是什麼</th></tr>
+<tr><td><code>CR</code></td><td><code>0x300</code></td><td><code>0x101</code></td><td><code>UARTEN | TXE</code></td></tr>
+<tr><td><code>IBRD</code></td><td><code>0x0</code></td><td><code>0xd</code></td><td>13</td></tr>
+<tr><td><code>FBRD</code></td><td><code>0x0</code></td><td><code>0x1</code></td><td>1/64</td></tr>
+<tr><td><code>LCR_H</code></td><td><code>0x0</code></td><td><code>0x70</code></td><td><code>FEN</code>（開 FIFO）<code>| WLEN8</code></td></tr>
+</table>
+</div>
+
+<p><code>IBRD</code> 和 <code>FBRD</code> 是程式從 <code>platform.h</code> 的 24 MHz 與 115200 算出來的，不是寫死的常數。</p>
+
+<h3><code>TXFF</code> 等待迴圈</h3>
+
+<pre><code>連寫 64 個字元，每次寫之前記錄 FR：
+  64 次讀到的值全部是 0x90，TXFF 一次都沒被拉起來
+  等待迴圈總共跑了 0 圈</code></pre>
+
+<p>QEMU 瞬間排空佇列，所以這個迴圈在這裡<strong>拿掉也毫無差別</strong>。它是為了真硬體 16 深的 FIFO 而寫的。</p>
+
+<h3>記憶體佈局</h3>
+
+<figure>
+<svg viewBox="0 0 790 400" role="img" aria-label="M2 之後的記憶體佈局：五個區段的位址與大小">
+  <defs>
+    <marker id="m2a" markerWidth="8" markerHeight="8" refX="6.5" refY="3" orient="auto">
+      <path d="M0,0 L6.5,3 L0,6" fill="none" stroke="currentColor" stroke-width="1.3"/></marker>
+  </defs>
+  <g font-family="ui-monospace,monospace" fill="currentColor">
+
+    <rect x="185" y="36" width="360" height="74" rx="7" fill="var(--kern)" opacity=".15"/>
+    <rect x="185" y="36" width="360" height="74" rx="7" fill="none" stroke="var(--kern)" stroke-width="1.7"/>
+    <text x="207" y="60" font-size="13" font-weight="700">.stack</text>
+    <text x="300" y="60" font-size="12.5">64 KB　　<tspan opacity=".55">0x10000</tspan></text>
+    <text x="300" y="77" font-size="10.5" opacity=".7">SP 從頂端出發，往下長</text>
+    <path d="M195 92 l14 -5 l14 10 l14 -10 l14 10 l14 -5" fill="none" stroke="var(--kern)" stroke-width="1.3" opacity=".65"/>
+    <text x="300" y="97" font-size="10" opacity=".6">（圖上壓縮過：它比其他四塊加起來還大 80 倍）</text>
+
+    <rect x="185" y="122" width="360" height="40" rx="7" fill="var(--ram)" opacity=".2"/>
+    <rect x="185" y="122" width="360" height="40" rx="7" fill="none" stroke="var(--ram)" stroke-width="1.7"/>
+    <text x="207" y="141" font-size="13" font-weight="700">.bss</text>
+    <text x="300" y="141" font-size="12.5">24 bytes　<tspan opacity=".55">0x18</tspan></text>
+    <text x="300" y="155" font-size="10.5" opacity=".7">boot_counter，開機被清成 0</text>
+
+    <rect x="185" y="168" width="360" height="18" rx="4" fill="none" stroke="currentColor" stroke-width="1" opacity=".32" stroke-dasharray="4 3"/>
+    <text x="300" y="181" font-size="10" opacity=".62">8 bytes　ALIGN(16) 的空隙，清零迴圈碰不到</text>
+
+    <rect x="185" y="194" width="360" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".45"/>
+    <text x="207" y="215" font-size="12" opacity=".7" font-weight="700">.eh_frame</text>
+    <text x="300" y="215" font-size="11.5" opacity=".7">240 bytes　<tspan opacity=".7">0xf0</tspan>　gcc 自動產生，沒人用到</text>
+
+    <rect x="185" y="236" width="360" height="38" rx="7" fill="var(--mmio)" opacity=".18"/>
+    <rect x="185" y="236" width="360" height="38" rx="7" fill="none" stroke="var(--mmio)" stroke-width="1.7"/>
+    <text x="207" y="255" font-size="13" font-weight="700">.rodata</text>
+    <text x="300" y="255" font-size="12.5">25 bytes　<tspan opacity=".55">0x19</tspan></text>
+    <text x="300" y="268" font-size="10.5" opacity=".75">"Hello, AArch64 from EL1\n"</text>
+
+    <rect x="185" y="282" width="360" height="76" rx="7" fill="var(--accent-soft)"/>
+    <rect x="185" y="282" width="360" height="76" rx="7" fill="none" stroke="var(--accent)" stroke-width="1.7"/>
+    <text x="207" y="304" font-size="13" font-weight="700">.text</text>
+    <text x="300" y="304" font-size="12.5">552 bytes　<tspan opacity=".55">0x228</tspan></text>
+    <text x="300" y="321" font-size="10.5" opacity=".75">boot.S + start.c + pl011.c 的全部指令</text>
+    <text x="300" y="337" font-size="10.5" opacity=".6">外加字面池：三個位址常數存在這裡</text>
+    <text x="300" y="351" font-size="10.5" opacity=".6">_start 在最底下，開機從那裡開始</text>
+
+    <text x="175" y="41"  text-anchor="end" font-size="11">0x40010350</text>
+    <text x="175" y="127" text-anchor="end" font-size="11">0x40000350</text>
+    <text x="175" y="173" text-anchor="end" font-size="11">0x40000340</text>
+    <text x="175" y="199" text-anchor="end" font-size="11">0x40000338</text>
+    <text x="175" y="241" text-anchor="end" font-size="11">0x40000248</text>
+    <text x="175" y="287" text-anchor="end" font-size="11">0x40000228</text>
+    <text x="175" y="362" text-anchor="end" font-size="11">0x40000000</text>
+
+    <path d="M 610 41 L 590 41 L 590 55 L 570 55" fill="none" stroke="var(--kern)" stroke-width="1.2" opacity=".7" marker-end="url(#m2a)"/>
+    <text x="616" y="38" font-size="10.5">__stack_top</text>
+    <path d="M 610 127 L 590 127 L 590 140 L 570 140" fill="none" stroke="var(--ram)" stroke-width="1.2" opacity=".7" marker-end="url(#m2a)"/>
+    <text x="616" y="124" font-size="10.5">__bss_end</text>
+    <path d="M 610 173 L 590 173 L 590 152 L 570 152" fill="none" stroke="var(--ram)" stroke-width="1.2" opacity=".7" marker-end="url(#m2a)"/>
+    <text x="616" y="170" font-size="10.5">__bss_start</text>
+    <text x="616" y="184" font-size="9.5" opacity=".6">（nm 看到的）</text>
+    <text x="616" y="199" font-size="9.5" opacity=".6">.bss 區段起點</text>
+    <text x="616" y="211" font-size="9.5" opacity=".6">（readelf 看到的）</text>
+    <path d="M 610 241 L 570 241" fill="none" stroke="var(--mmio)" stroke-width="1.2" opacity=".7" marker-end="url(#m2a)"/>
+    <text x="616" y="252" font-size="10.5" font-weight="700" fill="var(--mmio)">M2 新增</text>
+    <text x="616" y="265" font-size="9.5" opacity=".65">第一個字串常數</text>
+    <path d="M 610 362 L 590 362 L 590 348 L 570 348" fill="none" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#m2a)"/>
+    <text x="616" y="359" font-size="10.5" font-weight="700">_start</text>
+
+    <text x="20" y="392" font-size="10" opacity=".65">位址由下往上遞增。RAM 從 0x40000000 開始，再往下就不是記憶體了 —— 這是 SP = 0 會出事的原因。</text>
+  </g>
+</svg>
+<figcaption>M2 之後的實測配置（<code>readelf -S</code> 與 <code>nm</code>）。M1 當時還沒有 <code>.rodata</code></figcaption>
+</figure>
+
+<p><code>.rodata</code> 在 M1 之前不存在。M2 加了第一個字串常數之後，它本來是<strong>孤兒節</strong> —— 腳本沒提到、由 ld 自己找地方擺。現在明確寫進腳本了。</p>
+
+<p>想看「連結器腳本的哪一行 → 記憶體的哪一塊 → <code>boot.S</code> 的哪一行碰它」的三欄對照圖，在 <a href="m1-boot-flow.html">M1 教材</a>第 6 節。那張圖用的就是上面這組數字。</p>
+
+<h3>兩張表疊起來：符號不等於區段</h3>
+
+<p><code>readelf -S</code> 看的是<strong>區段</strong>——編譯器把程式切成的幾大塊。<code>nm</code> 看的是<strong>符號</strong>——名字對應到哪個位址。兩者不一定重合，把它們疊在同一根軸上就看得出來。</p>
+
+<figure>
+<svg viewBox="0 0 790 560" role="img" aria-label="區段與符號疊在同一根位址軸上">
+  <g font-family="ui-monospace,monospace" fill="currentColor">
+
+    <text x="118" y="20" text-anchor="middle" font-size="11" font-weight="700" opacity=".7">位址 ↓ 遞增</text>
+    <text x="290" y="20" text-anchor="middle" font-size="11" font-weight="700" opacity=".7">區段（readelf -S）</text>
+    <text x="560" y="20" text-anchor="middle" font-size="11" font-weight="700" opacity=".7">符號（nm）</text>
+    <line x1="20" y1="28" x2="770" y2="28" stroke="currentColor" stroke-width="1" opacity=".25"/>
+
+    <rect x="185" y="40" width="210" height="300" rx="6" fill="var(--accent-soft)"/>
+    <rect x="185" y="40" width="210" height="300" rx="6" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+    <text x="290" y="62" text-anchor="middle" font-size="13" font-weight="700">.text</text>
+    <text x="290" y="78" text-anchor="middle" font-size="10.5" opacity=".65">552 bytes　可執行</text>
+
+    <text x="176" y="46" text-anchor="end" font-size="10.5">0x40000000</text>
+    <text x="176" y="346" text-anchor="end" font-size="10.5">0x40000228</text>
+
+    <g font-size="10.5">
+      <text x="410" y="100"><tspan font-weight="700" fill="var(--accent)">T</tspan>  _start          <tspan opacity=".5">0x00</tspan></text>
+      <text x="410" y="118"><tspan opacity=".6">t</tspan>  el1_entry       <tspan opacity=".5">0x28</tspan></text>
+      <text x="410" y="136"><tspan opacity=".6">t</tspan>  bss_zero        <tspan opacity=".5">0x38</tspan></text>
+      <text x="410" y="154"><tspan opacity=".6">t</tspan>  enter_c         <tspan opacity=".5">0x48</tspan></text>
+      <text x="410" y="172"><tspan opacity=".6">t</tspan>  halt_loop       <tspan opacity=".5">0x4c</tspan></text>
+      <text x="410" y="190" opacity=".45">（字面池 0x58–0x6f，無名）</text>
+      <text x="410" y="208"><tspan opacity=".6">t</tspan>  bump            <tspan opacity=".5">0x70</tspan></text>
+      <text x="410" y="226"><tspan font-weight="700" fill="var(--accent)">T</tspan>  kernel_main     <tspan opacity=".5">0x94</tspan></text>
+      <text x="410" y="244"><tspan opacity=".6">t</tspan>  mmio_write32    <tspan opacity=".5">0xb4</tspan></text>
+      <text x="410" y="262"><tspan opacity=".6">t</tspan>  mmio_read32     <tspan opacity=".5">0xd8</tspan></text>
+      <text x="410" y="280"><tspan font-weight="700" fill="var(--accent)">T</tspan>  uart_init       <tspan opacity=".5">0xf0</tspan></text>
+      <text x="410" y="298"><tspan opacity=".6">t</tspan>  uart_putc_raw   <tspan opacity=".5">0x16c</tspan></text>
+      <text x="410" y="316"><tspan font-weight="700" fill="var(--accent)">T</tspan>  uart_putc       <tspan opacity=".5">0x1b0</tspan></text>
+      <text x="410" y="334"><tspan font-weight="700" fill="var(--accent)">T</tspan>  uart_puts       <tspan opacity=".5">0x1e4</tspan></text>
+    </g>
+    <line x1="399" y1="88" x2="399" y2="340" stroke="var(--accent)" stroke-width="1" opacity=".35"/>
+
+    <rect x="185" y="348" width="210" height="34" rx="6" fill="var(--mmio)" opacity=".18"/>
+    <rect x="185" y="348" width="210" height="34" rx="6" fill="none" stroke="var(--mmio)" stroke-width="1.6"/>
+    <text x="290" y="369" text-anchor="middle" font-size="12.5">.rodata　25 bytes</text>
+    <text x="410" y="369" font-size="10.5" opacity=".55">一個符號都沒有</text>
+    <text x="176" y="388" text-anchor="end" font-size="10.5">0x40000248</text>
+
+    <rect x="185" y="390" width="210" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".45"/>
+    <text x="290" y="415" text-anchor="middle" font-size="12" opacity=".7">.eh_frame　240 bytes</text>
+    <text x="410" y="415" font-size="10.5" opacity=".55">一個符號都沒有</text>
+    <text x="176" y="440" text-anchor="end" font-size="10.5">0x40000338</text>
+
+    <rect x="185" y="438" width="210" height="46" rx="6" fill="var(--ram)" opacity=".2"/>
+    <rect x="185" y="438" width="210" height="46" rx="6" fill="none" stroke="var(--ram)" stroke-width="1.6"/>
+    <text x="290" y="456" text-anchor="middle" font-size="12.5">.bss　24 bytes</text>
+    <rect x="185" y="438" width="210" height="14" fill="var(--mmio)" opacity=".22"/>
+    <text x="290" y="449" text-anchor="middle" font-size="9" opacity=".8">這 8 bytes 沒有符號蓋到</text>
+    <text x="176" y="470" text-anchor="end" font-size="10.5" font-weight="700">0x40000340</text>
+    <text x="410" y="470" font-size="10.5"><tspan font-weight="700" fill="var(--ram)">B</tspan> __bss_start　<tspan opacity=".6">b</tspan> boot_counter</text>
+
+    <rect x="185" y="492" width="210" height="46" rx="6" fill="var(--kern)" opacity=".15"/>
+    <rect x="185" y="492" width="210" height="46" rx="6" fill="none" stroke="var(--kern)" stroke-width="1.6"/>
+    <text x="290" y="516" text-anchor="middle" font-size="12.5">.stack　64 KB</text>
+    <text x="290" y="531" text-anchor="middle" font-size="10" opacity=".6">（圖上壓縮過）</text>
+    <text x="176" y="498" text-anchor="end" font-size="10.5">0x40000350</text>
+    <text x="410" y="498" font-size="10.5"><tspan font-weight="700" fill="var(--ram)">B</tspan> __bss_end　<tspan opacity=".55">跟 .stack 起點同一個位址</tspan></text>
+    <text x="176" y="544" text-anchor="end" font-size="10.5">0x40010350</text>
+    <text x="410" y="544" font-size="10.5"><tspan font-weight="700" fill="var(--kern)">B</tspan> __stack_top</text>
+  </g>
+</svg>
+<figcaption><strong>注意這張圖的位址是<em>由上往下</em>遞增</strong>，跟上一張相反——這裡要跟 <code>nm -n</code> 的輸出順序對齊。<code>T</code>／<code>B</code> 大寫是全域，<code>t</code>／<code>b</code> 小寫是 <code>static</code>；位址與型別皆實測</figcaption>
+</figure>
+
+<div class="callout">
+<span class="lbl">這張圖說了四件事</span>
+<p><strong>1. <code>.rodata</code> 和 <code>.eh_frame</code> 一個符號都沒有。</strong> 那個 <code>"Hello, AArch64 from EL1\n"</code> 就住在 <code>.rodata</code>，但它是<strong>匿名的字串字面值</strong>——編譯器直接用位址引用，沒人需要它的名字。所以 <code>nm</code> 看不到，<code>readelf</code> 看得到。</p>
+<p><strong>2. <code>.text</code> 裡面有一段沒有名字的資料。</strong> <code>halt_loop</code> 後面的 <code>0x58</code>–<code>0x6f</code> 是<strong>字面池</strong>，存著三個位址常數。<code>objdump</code> 只好叫它 <code>halt_loop+0xc</code>——用最近的前一個符號加偏移來描述。</p>
+<p><strong>3. <code>__bss_start</code> 比 <code>.bss</code> 區段晚 8 個 byte。</strong> 那 8 bytes 是 <code>ALIGN(16)</code> 推出來的，在區段裡但清零迴圈碰不到（它從 <code>__bss_start</code> 起跑）。<strong>「區段多大」和「迴圈清多少」是兩個數字</strong>：區段 24 bytes，迴圈只走 16。</p>
+<p><strong>4. <code>__bss_end</code> 和 <code>.stack</code> 的起點是同一個位址。</strong> 因為「結束的下一個」剛好等於「下一塊的開始」。清零迴圈的 <code>b.hs</code> 是<strong>等於就停</strong>，所以它不會寫進堆疊——差一個字就會踩過去。</p>
+</div>
+
+<div class="callout myth">
+<span class="lbl">還有一個不在這根軸上的符號</span>
+<p><code>nm</code> 的第一行是：</p>
+<pre style="margin:10px 0"><code>0000000000010000 A STACK_SIZE</code></pre>
+<p><strong><code>0x10000</code> 不是位址，是值本身</strong>——就是連結器腳本裡 <code>STACK_SIZE = 64K;</code> 那個 64K。</p>
+<p><code>A</code> 是 absolute，代表它不屬於任何區段。<strong>把它當位址去讀，會讀到 flash 區的垃圾。</strong></p>
+</div>
+
+<h3>堆疊用量</h3>
+
+<figure>
+<svg viewBox="0 0 790 330" role="img" aria-label="最深呼叫鏈的堆疊用量，與 64 KB 堆疊的比例">
+  <defs>
+    <marker id="m2b" markerWidth="8" markerHeight="8" refX="6.5" refY="3" orient="auto">
+      <path d="M0,0 L6.5,3 L0,6" fill="none" stroke="currentColor" stroke-width="1.3"/></marker>
+  </defs>
+  <g font-family="ui-monospace,monospace" fill="currentColor">
+
+    <text x="20" y="22" font-size="11.5" font-weight="700" opacity=".75">最深的一條呼叫鏈</text>
+
+    <rect x="20" y="34" width="330" height="30" rx="6" fill="var(--accent-soft)"/>
+    <rect x="20" y="34" width="330" height="30" rx="6" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+    <text x="36" y="54" font-size="12">kernel_main</text>
+    <text x="336" y="54" text-anchor="end" font-size="12" font-weight="700">16</text>
+
+    <rect x="44" y="70" width="306" height="30" rx="6" fill="var(--accent-soft)"/>
+    <rect x="44" y="70" width="306" height="30" rx="6" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+    <text x="60" y="90" font-size="12">uart_puts</text>
+    <text x="336" y="90" text-anchor="end" font-size="12" font-weight="700">32</text>
+
+    <rect x="68" y="106" width="282" height="30" rx="6" fill="var(--accent-soft)"/>
+    <rect x="68" y="106" width="282" height="30" rx="6" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+    <text x="84" y="126" font-size="12">uart_putc</text>
+    <text x="336" y="126" text-anchor="end" font-size="12" font-weight="700">32</text>
+
+    <rect x="92" y="142" width="258" height="30" rx="6" fill="var(--accent-soft)"/>
+    <rect x="92" y="142" width="258" height="30" rx="6" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+    <text x="108" y="162" font-size="12">uart_putc_raw</text>
+    <text x="336" y="162" text-anchor="end" font-size="12" font-weight="700">32</text>
+
+    <rect x="116" y="178" width="234" height="30" rx="6" fill="var(--accent-soft)"/>
+    <rect x="116" y="178" width="234" height="30" rx="6" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+    <text x="132" y="198" font-size="12">mmio_write32</text>
+    <text x="336" y="198" text-anchor="end" font-size="12" font-weight="700">16</text>
+
+    <line x1="116" y1="218" x2="350" y2="218" stroke="currentColor" stroke-width="1.2" opacity=".5"/>
+    <text x="132" y="236" font-size="12" opacity=".8">合計</text>
+    <text x="336" y="236" text-anchor="end" font-size="13.5" font-weight="700">128 bytes</text>
+
+    <text x="20" y="268" font-size="10.5" opacity=".65">每往下一層，被呼叫的函式自己在堆疊上挖一塊放 x30 與區域變數。</text>
+    <text x="20" y="284" font-size="10.5" opacity=".65">CR/LF 轉換多包的那一層（uart_putc_raw）只加了 32 bytes。</text>
+    <text x="20" y="300" font-size="10.5" opacity=".65">數字來自 gcc -fstack-usage，不是估的。</text>
+
+    <text x="470" y="22" font-size="11.5" font-weight="700" opacity=".75">放進 64 KB 的堆疊裡</text>
+
+    <rect x="470" y="34" width="86" height="240" rx="6" fill="var(--kern)" opacity=".14"/>
+    <rect x="470" y="34" width="86" height="240" rx="6" fill="none" stroke="var(--kern)" stroke-width="1.6"/>
+    <rect x="470" y="34" width="86" height="2.4" fill="var(--accent)"/>
+    <text x="513" y="160" text-anchor="middle" font-size="12.5" opacity=".75">64 KB</text>
+    <text x="513" y="177" text-anchor="middle" font-size="10.5" opacity=".55">一直沒被用到</text>
+
+    <path d="M 640 40 L 600 40 L 600 35 L 562 35" fill="none" stroke="var(--accent)" stroke-width="1.3" marker-end="url(#m2b)"/>
+    <text x="646" y="32" font-size="11" font-weight="700">128 bytes</text>
+    <text x="646" y="46" font-size="10.5" opacity=".7">＝ 0.2%</text>
+    <text x="646" y="62" font-size="10" opacity=".6">畫成 2.4 px 已經是</text>
+    <text x="646" y="75" font-size="10" opacity=".6">為了看得見而放大的</text>
+
+    <text x="470" y="300" font-size="10.5" opacity=".65">M7 開始有多個行程，每個都要一份堆疊 —— 那時這個數字才會開始有意義。</text>
+  </g>
+</svg>
+<figcaption>最深呼叫鏈用掉 128 bytes，佔 64 KB 堆疊的 0.2%。實測自 <code>gcc -fstack-usage</code></figcaption>
+</figure>
+
+<h2 id="s10"><span class="num">10</span>精髓</h2>
+
+<ol>
+  <li><strong>週邊裝置的暫存器不是記憶體，編譯器不知道這件事。</strong> <code>volatile</code> 是唯一告訴它的方法，而且少了它不會有錯誤訊息 —— 只會少做事。</li>
+  <li><strong>「拿掉它現在會壞嗎」要連編譯旗標一起問。</strong> 同一段程式碼在 <code>-O0</code> 和 <code>-O2</code> 下，答案是相反的。</li>
+  <li><strong>唯一能驗證的平台，可能剛好是看不出錯的那個。</strong> 鮑率的捨去 vs 四捨五入在 QEMU 上完全一致，只在真機的時脈上分岔。<strong>「測過了」和「在會出錯的條件下測過了」是兩件事。</strong></li>
+  <li><strong>一個看起來完整的抽象層，比一個明說有缺口的危險。</strong> <code>platform.h</code> 說「驅動不用改」是真的，但沒說 GPIO muxing 得另外做 —— 讀者會在真板子上得到全黑畫面，然後不知道從哪查起。</li>
+</ol>
+
+<h2 id="s11"><span class="num">11</span>一頁式小抄</h2>
+
+<div class="cheat">
+<h3>PL011 暫存器</h3>
+<pre><code>+0x00  DR      寫進去 = 送一個字元
++0x18  FR      bit5 TXFF = 送出佇列滿了
++0x24  IBRD    鮑率除數整數部
++0x28  FBRD    鮑率除數小數部（1/64）
++0x2c  LCR_H   bit4 FEN 開 FIFO、bits[6:5] WLEN（3 = 8 bits）
++0x30  CR      bit0 UARTEN、bit8 TXE、bit9 RXE</code></pre>
+
+<h3>初始化順序</h3>
+<pre><code>1. CR = 0            先關掉（改設定不能在運轉中做）
+2. IBRD、FBRD        設鮑率
+3. LCR_H             設字元格式 —— 寫這個才會 latch 上一步
+4. CR = UARTEN|TXE   開起來</code></pre>
+
+<h3>鮑率</h3>
+<pre><code>divisor = clk / (16 × baud)
+div64   = (clk × 8 / baud + 1) / 2      整數形式的四捨五入
+IBRD    = div64 / 64        FBRD = div64 % 64
+
+24 MHz / 115200  →  833  →  (13, 1)   誤差 +0.04%</code></pre>
+
+<h3>標頭裡的函式為什麼要 <code>static inline</code></h3>
+<pre><code>定義寫在標頭 → 每個 include 它的 .c 都貼一份
+
+static   斷「兩份撞名」    少了 → multiple definition
+inline   斷「沒用到被唸」  少了 → -Wunused-function（配 -Werror 就擋建置）
+
+只寫 inline（沒 static）  → -O0 下 undefined reference
+
+MMIO 的寬度看【裝置的暫存器】，不是【CPU 的暫存器】：
+  x0-x30（CPU 裡）        64 位元
+  DR/FR/IBRD（PL011 裡）  32 位元  → 資料用 uint32_t
+  位址空間                64 位元  → 位址用 uintptr_t
+  證據：從 IBRD 讀 8 bytes 會讀到 FBRD 黏在高 32 位元</code></pre>
+
+<h3>C 的幾個容易寫錯的地方</h3>
+<pre><code>volatile uint32_t *p     ← 目標是 volatile   ✅
+uint32_t * volatile p    ← 指標自己是       ❌ 保護錯對象
+
+const char *s            ← 內容唯讀，指標可動  ✅
+char * const s           ← 反過來
+
+void f(void)             ← 沒有參數          ✅
+void f()                 ← 「參數不詳」，C 不擋 f(1,2,3)
+
+#define M (1u &lt;&lt; 5)      ← u 防有號左移
+#define M 1u &lt;&lt; 5        ← x &amp; M 沒事（&lt;&lt; 優先序高於 &amp;）
+                            但 M + 1 會變成 1u &lt;&lt; 6 = 64
+
+clk * 8UL / baud         ← 有一個 UL 就整式提升到 64 位元  ✅
+clk * 8   / baud         ← 全部 32 位元，換高時脈會溢位
+
+*s++                     ← *(s++) 讀了再移動指標
+(*s)++                   ← 改字元本身；參數是 const char * 所以編不過
+
+(uint32_t)(unsigned char)c   ← 先斷符號再放大，可攜
+(uint32_t)c                  ← char 有號的平台會符號延伸</code></pre>
+
+<h3>兩種儲存期，規則不一樣</h3>
+<pre><code>void f(void){ unsigned long x; x++; }   自動儲存期 → 垃圾值 → UB
+static unsigned long g;       g++;      靜態儲存期 → 保證 0 → 合法
+
+「保證 0」是 C 標準規定的通則，但【誰去做】不是：
+  Linux 一般程式   核心的 ELF 載入器
+  這個專案         沒有人 → boot.S 自己清
+
+證明：拿掉 boot.S 的清零迴圈，開機前塞 0xcafe1234
+      → 進 kernel_main 時它還在</code></pre>
+
+<h3>變數落在哪個 section</h3>
+<pre><code>static unsigned long a;      → .bss    只記大小
+static unsigned long b = 0;  → .bss    明著寫 0 也一樣
+static unsigned long c = 7;  → .data   要存那個 7
+
+static  在檔案層級 = 不對外公開（nm 顯示小寫）
+        在函式裡面 = 壽命是整個程式</code></pre>
+
+<h3>讀 nm 的輸出</h3>
+<pre><code>T / t   .text     程式碼        大寫 = 全域，小寫 = static
+B / b   .bss      未初始化資料   同上
+D / d   .data     已初始化資料   同上（M2 還沒有）
+A       absolute  不是位址，是值本身
+
+0000000000010000 A STACK_SIZE     ← 這是 64K 這個數字，不是位址
+0000000040000340 B __bss_start    ← 這才是位址</code></pre>
+
+<h3>查位址</h3>
+<pre><code>make dtb                     讓 QEMU 吐出 device tree
+xxd /tmp/out.log             看實際送出去的位元組
+gcc -fstack-usage            每個函式用掉多少堆疊
+ld --orphan-handling=warn    哪些區段是 ld 自己擺的</code></pre>
+</div>
+
+<footer>
+armos · 里程碑 M2 · 開發平台 QEMU virt，移植目標 Raspberry Pi 4（BCM2711）<br>
+程式碼：<code>include/mmio.h</code>、<code>include/platform.h</code>、<code>drivers/uart/pl011.c</code>
+</footer>
+</div>
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+  var secs = links.map(function (a) {
+    return document.getElementById(a.getAttribute('href').slice(1));
+  });
+  function update() {
+    var y = window.pageYOffset + 130, cur = 0;
+    for (var i = 0; i < secs.length; i++) {
+      if (secs[i] && secs[i].offsetTop <= y) cur = i;
+    }
+    links.forEach(function (a, i) {
+      if (i === cur) a.classList.add('on'); else a.classList.remove('on');
+    });
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update);
+  window.addEventListener('load', update);
+  update();
+})();
+</script>
