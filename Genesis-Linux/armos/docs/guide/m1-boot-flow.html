@@ -940,7 +940,7 @@ $ aarch64-linux-gnu-objdump -d leaf.o
 
 <p><strong>但這個專案沒有加任何 <code>-O</code> 旗標，也就是 <code>-O0</code>。</strong> 在 <code>-O0</code> 下加不加 <code>noinline</code>，<code>bump</code> 和 <code>kernel_main</code> 的機器碼<strong>一個 byte 都不差</strong>。同一支變數 <code>boot_counter</code> 上的 <code>volatile</code> 也一樣，拿掉毫無變化。</p>
 
-<p>本專案的鐵則之一是：<strong>拿掉它，現在會壞嗎？不會，就不該現在寫。</strong> 兩個都不會，所以兩個都拿掉了。</p>
+<p>本專案的原則之一是：<strong>拿掉它，現在會壞嗎？不會，就不該現在寫。</strong> 兩個都不會，所以兩個都拿掉了。</p>
 
 <p>真到了要開 <code>-O2</code> 的那天，加回去的那個 commit 會自帶一個好理由——這正是 <code>git log</code> 當教材的價值。</p>
 

@@ -84,7 +84,7 @@ h2{scroll-margin-top:24px}
 <a href="#s6"><span class="n">6</span>三個設計選擇</a>
 <a href="#s7"><span class="n">7</span>C 語言：這些寫法為什麼是這樣</a>
 <a href="#s8"><span class="n">8</span>沒有 libc：memset / memcpy / strlen / strcmp</a>
-<a href="#s9"><span class="n">9</span>printf：可變參數，撞上一顆關著的浮點單元</a>
+<a href="#s9"><span class="n">9</span>printf：怎麼運作，以及一寫完就當機</a>
 <a href="#s10"><span class="n">10</span>被推翻的直覺</a>
 <a href="#s11"><span class="n">11</span>實測數據</a>
 <a href="#s12"><span class="n">12</span>精髓</a>
@@ -211,7 +211,7 @@ movk x0, #0x900, lsl #16    再塞 bit16-31  x0 = 0x0000_0000_0900_0030</code></
 <div class="callout myth">
 <span class="lbl">但這件事現在證明不出來</span>
 <p>本專案目前沒有加任何 <code>-O</code> 旗標，也就是 <code>-O0</code>。實測 <code>-O0</code> 下<strong>加不加 <code>volatile</code>，產出的組語逐位元組相同</strong>。</p>
-<p>照鐵則五的字面判準（「拿掉它現在會壞嗎」），<code>volatile</code> 現在不會壞。</p>
+<p>照「只寫現在就有作用的東西」這條原則的字面判準（「拿掉它現在會壞嗎」），<code>volatile</code> 現在不會壞。</p>
 <p><strong>但把 <code>-O0</code> 換成 <code>-O2</code>，「拿掉 <code>volatile</code>」就會壞了</strong>——而且壞的方式非常漂亮，見第 10 節。</p>
 <p>講清楚免得誤會：<strong><code>volatile</code> 本身在 <code>-O2</code> 下是有效的</strong>，該保留的寫入一條都不會少。會壞的是「拿掉它」那一邊。<code>-O0</code> 看不出差別，只是因為那個等級的編譯器本來就不做這種優化。</p>
 </div>
@@ -590,7 +590,7 @@ uart2.c  貼一份 mmio_write32
 
 把 static inline 改成 static，整個核心重編  →  exit 0</code></pre>
 <p><strong>只有一個檔 include，而且兩個函式都用到了</strong>，所以第 2 段觸發不了。</p>
-<p>照鐵則五的判準，<code>inline</code> 現在不是承重的。但它離承重只差一步——<strong>下一個 include <code>mmio.h</code> 卻只寫不讀的 <code>.c</code> 出現，建置就會斷</strong>。</p>
+<p>照「拿掉它現在會壞嗎」的判準，<code>inline</code> 現在不是承重的。但它離承重只差一步——<strong>下一個 include <code>mmio.h</code> 卻只寫不讀的 <code>.c</code> 出現，建置就會斷</strong>。</p>
 <p><strong>這裡本來預測「M2 的下一包 <code>lib/</code> 很可能就是」——也錯了。</strong>
 實測把 <code>mmio.h</code> 的 <code>static inline</code> 改成純 <code>static</code>，加了
 <code>string.c</code> 和 <code>printf.c</code> 之後仍然 <code>exit 0</code>。
@@ -880,7 +880,7 @@ nm | grep -E 'boot_counter|bump'   →  <b>零個結果</b></code></pre>
 EL        = $2 = 1
 bss 清了嗎 = No symbol table is loaded.  Use the "file" command.</code></pre>
 <p><strong>不是壞掉，是證據消失。</strong> 前兩行照樣正確，只有第三行沉默地失去意義。</p>
-<p>照鐵則五的判準，現在（<code>-O0</code>）加 <code>volatile</code> 不會改變任何指令，所以還不該加。但這是一則<strong>已經寫在牆上的預告</strong>：真的開 <code>-O2</code> 的那個 commit，除了 <code>mmio.h</code> 之外，還得處理這個見證變數。</p>
+<p>照「拿掉它現在會壞嗎」的判準，現在（<code>-O0</code>）加 <code>volatile</code> 不會改變任何指令，所以還不該加。但這是一則<strong>已經寫在牆上的預告</strong>：真的開 <code>-O2</code> 的那個 commit，除了 <code>mmio.h</code> 之外，還得處理這個見證變數。</p>
 </div>
 
 <h2 id="s8"><span class="num">8</span>沒有 libc：<code>memset</code>／<code>memcpy</code>／<code>strlen</code>／<code>strcmp</code> 自己寫</h2>
@@ -1006,7 +1006,7 @@ n<b>E</b>   no Early write acknowledgement   不准提早回報「寫好了」</
 
 <p>這是本里程碑最值得記的一種 bug：<strong>它在你的機器上永遠不會出現。</strong></p>
 
-<h2 id="s9"><span class="num">9</span><code>printf</code>：可變參數，撞上一顆關著的浮點單元</h2>
+<h2 id="s9"><span class="num">9</span><code>printf</code>：怎麼運作，以及一寫完就當機</h2>
 
 <p>上一節補完了四個函式，其中 <code>strlen</code> 是為了這一節才寫的。現在做 <code>printf</code>。</p>
 
@@ -1014,20 +1014,529 @@ n<b>E</b>   no Early write acknowledgement   不准提早回報「寫好了」</
 要印「<code>ESR_EL1</code> 現在是多少」就沒轍了——那是一個執行時才知道的數字。
 M3 的例外處理整包都靠這個：例外發生時，唯一能告訴你「發生什麼事」的就是那幾個暫存器的值。</p>
 
-<p>但這一節真正的內容不是格式化字串怎麼解析。<strong>是 <code>printf</code> 一寫完，
-核心就當掉了</strong>——而原因跟 <code>printf</code> 的邏輯完全無關。
-下面照著當時的順序走一遍：先看可變參數在 AArch64 怎麼傳，那是當機的起點。</p>
+<p>這一節分兩半：</p>
+<ul>
+<li><strong>前半：<code>printf</code> 怎麼運作。</strong>先講它到底在做什麼，再一層一層往下拆到 <code>lib/printf.c</code> 的每一段，
+接著看 <code>format</code> 屬性能幫你擋住多少錯，最後是 <code>%s</code> 怎麼用到 <code>strlen</code>、碰到中文會怎樣。</li>
+<li><strong>後半：它一寫完，核心就當掉了。</strong>原因跟 <code>printf</code> 的邏輯完全無關，
+而是可變參數在 AArch64 上被編譯出來的指令，撞上了一個還關著的浮點單元。</li>
+</ul>
 
-<p class="sub">（先說清楚：這個 trap 是在一份臨時的自我測試裡撞到的。它為什麼<strong>也</strong>是交付版的問題——
+<h3><code>printf</code> 在做什麼：模板加資料，變成一個一個字元</h3>
+
+<p>一句話：<strong>把「模板」和「資料」合在一起，變成一串字元，一個一個交出去。</strong></p>
+
+<pre><code>printf("x=%05d\n", -42);
+
+模板   "x=%05d\n"
+資料   -42
+結果   x  =  -  0  0  4  2  \n        ← 一個一個交給 uart_putc</code></pre>
+
+<p>可以把模板想成一張有空格的表單：</p>
+
+<pre><code>x = [＿＿＿＿＿] 換行
+     ↑
+     %05d 這個空格的意思是：「填一個整數，至少佔 5 格，不夠補 0」</code></pre>
+
+<p><code>printf</code> 從左往右讀這張表單：看到普通字就照抄；看到空格（<code>%</code> 開頭）就從資料裡拿一筆出來填進去。</p>
+
+<div class="callout">
+<span class="lbl">它不碰暫存器，也不先把整句拼好</span>
+<p><strong><code>lib/printf.c</code> 裡 <code>mmio</code> 出現 0 次。</strong>整個核心真正把字元寫進 UART 的 DR 暫存器的，
+只有 <code>drivers/uart/pl011.c</code> 的 <code>uart_putc_raw</code> 裡那一行 <code>mmio_write32(UART0_BASE + UART_DR, ...)</code>。</p>
+<p><code>printf</code> 的工作是<strong>翻譯</strong>：<code>-42</code> 在記憶體裡是 <code>0xffffffd6</code>，UART 看不懂數字，
+它一次只收一個字元。<code>printf</code> 負責把它變成 <code>'-'</code> <code>'4'</code> <code>'2'</code>，再一層一層往下交：</p>
+<pre style="margin:10px 0"><code>printf                    決定要送「哪些」字元        lib/printf.c
+  └ emit                  送一個，順便計數            lib/printf.c
+     └ uart_putc          遇到 \n 先補一個 \r         drivers/uart/pl011.c
+        └ uart_putc_raw   等 FIFO 有空位              drivers/uart/pl011.c
+           └ mmio_write32 寫進 DR ← 字元真正送出去   include/mmio.h</code></pre>
+<p>而且它<strong>邊讀邊送</strong>：讀到 <code>x</code> 就送 <code>x</code>，讀到 <code>%05d</code> 就算出 <code>-0042</code> 一個一個送。
+整句話從來沒有被存在任何地方，唯一的暫存空間是把<strong>一個數字</strong>的位數倒過來用的小陣列（後面 <code>put_num</code> 那一小節）。
+這是刻意的：還沒有記憶體配置器，拼不出一整句；而且印到一半當掉時，<strong>已經送出去的字元已經在線上了</strong>，你至少看得到當掉前印到哪。</p>
+</div>
+
+<h3><code>lib/printf.c</code> 裡的五個函式，所有輸出都匯進 <code>emit</code></h3>
+
+<div class="tbl">
+<table>
+<tr><th>函式</th><th>做什麼</th></tr>
+<tr><td><code>printf()</code></td><td><strong>總指揮</strong>。從左到右讀模板，決定每個位置印什麼</td></tr>
+<tr><td><code>put_num()</code></td><td>把<strong>一個整數</strong>變成字元印出來</td></tr>
+<tr><td><code>put_str()</code></td><td>把<strong>一個字串</strong>印出來，不夠寬時左邊補空白</td></tr>
+<tr><td><code>pad()</code></td><td>印 <strong>n 個相同的字元</strong>，用來補空白或補零；n 是 0 或負數就不印</td></tr>
+<tr><td><code>emit()</code></td><td>印 <strong>1 個字元</strong>並計數。全檔案唯一呼叫 <code>uart_putc</code> 的地方</td></tr>
+</table>
+</div>
+
+<p>另外兩個配角：<code>struct out</code> 是計數器（下面跟 <code>emit</code> 一起看），<code>NUM_BUF_MAX</code> 是 <code>put_num</code> 那個小陣列的大小。</p>
+
+<p>誰呼叫誰：</p>
+
+<pre><code>printf
+ ├── emit                           普通字、%c 的字元、%%、0x、未支援規格原樣印
+ ├── pad ── emit                    %c 前面補空白
+ ├── put_str ─┬─ pad ── emit        先補空白
+ │            └─ emit               再印字串
+ └── put_num ─┬─ pad ── emit        補位
+              └─ emit               印數字；負號也從這裡出去（%05d 時在補位之前）
+
+emit ── uart_putc                   ← 在這裡離開 lib/printf.c</code></pre>
+
+<p class="sub">檔案裡總指揮反而在最下面：由上往下是 <code>emit → pad → put_str → put_num → printf</code>。
+C 要求在原始碼裡呼叫某個函式的那一行之前，就先宣告過它；把小函式直接寫在前面，就不必另外寫一行宣告。
+<strong>讀的時候反過來讀</strong>：先看 <code>printf</code>，再看它叫的小函式。</p>
+
+<p>讀 <code>printf</code> 之前，先花一分鐘看最小的兩個：<code>emit</code> 和 <code>pad</code>，後面到處都在呼叫它們。兩個都是 <code>static</code>，只在這個檔案裡活動：</p>
+
+<pre><code>struct out { int count; };   <b>唯一的欄位：到目前為止送出了幾個字元</b>
+
+static void emit(struct out *o, char c)         送一個字元，順便計數
+{
+    uart_putc(c);
+    o-&gt;count++;
+}
+
+static void pad(struct out *o, char c, int n)   送 n 個 c；n &lt;= 0 就一個都不送
+{
+    while (n-- &gt; 0) {
+        emit(o, c);
+    }
+}</code></pre>
+
+<p><code>struct out</code> 只是一個計數器。<code>printf</code> 依標準要回傳「總共印了幾個字元」，
+而真正送字的地方散在好幾個函式裡，所以拿一個指標一路傳下去，每送一個字就加一。
+（為什麼不乾脆用全域變數？見本節最後那張設計選擇表。）</p>
+
+<div class="callout">
+<span class="lbl">pad 的 while (n-- &gt; 0) 跟第 8 節那個長得一樣，但安全的理由相反</span>
+<p>第 8 節講 <code>memset</code> 時說：這樣寫是因為 <code>n</code> 是 <code>size_t</code>（<strong>無號</strong>），
+寫成 <code>while (--n)</code> 的話 <code>n = 0</code> 會變成 <code>0xffffffffffffffff</code>。</p>
+<p><code>pad</code> 的 <code>n</code> 是 <code><b>int</b></code>（<strong>有號</strong>）。而且它<strong>本來就會收到負數</strong>——
+<code>width - len</code> 在「寬度比字串短」時就是負的。有號數不會繞回去，<code>-3 &gt; 0</code> 為假，迴圈直接不跑。</p>
+<p><strong>同一個寫法，一邊靠「無號不能減到負的」、一邊靠「有號可以是負的」。</strong>
+所以寬度比內容還短時，<code>pad</code> 自己就什麼都不做——後面 <code>%s</code> 小節裡 <code>%2s</code> 配 <code>"hello"</code> 不會被截斷，靠的就是這一點。</p>
+</div>
+
+<h3><code>printf</code> 本體分三段：準備、逐字讀模板、收尾</h3>
+
+<pre><code>int printf(const char *fmt, ...)
+{
+    struct out o = { .count = 0 };     <span style="opacity:.6">// 第一段：準備。計數器歸零</span>
+    va_list ap;                        <span style="opacity:.6">//         「資料讀到哪了」的游標</span>
+    va_start(ap, fmt);                 <span style="opacity:.6">//         游標指向第一筆資料</span>
+
+    for (const char *p = fmt; *p != '\0'; p++) {     <span style="opacity:.6">// 第二段：逐字讀模板</span>
+        if (*p != '%') {
+            emit(&amp;o, *p);                <span style="opacity:.6">// 情況一：普通字，直接印</span>
+            continue;
+        }
+        ...                            <span style="opacity:.6">// 情況二：是 %，讀規格、取資料、印出來</span>
+    }
+
+    va_end(ap);                        <span style="opacity:.6">// 第三段：收尾</span>
+    return o.count;                    <span style="opacity:.6">//         回傳印了幾個字</span>
+}</code></pre>
+
+<p><code>p</code> 是一根手指，指著模板裡的某個字元。每跑一圈往右移一格，碰到結尾的 <code>'\0'</code> 就停。
+每一圈只有兩種情況：普通字直接印，或者是 <code>%</code>。</p>
+
+<p class="sub"><code>const char *p</code> 的意思是「<code>p</code> 可以移動，但不能透過它改字串內容」。
+<code>printf</code> 手上的 <code>o</code> 是計數器本身，所以傳給小函式時要寫 <code>&amp;o</code> 取位址；小函式收到的已經是指標，寫 <code>o</code> 就好。</p>
+
+<div class="callout">
+<span class="lbl">C 層的工具：va_list / va_start / va_arg / va_end</span>
+<p>參數列裡的 <code>...</code> 表示後面的參數個數不固定。C 用 <code>&lt;stdarg.h&gt;</code>（第 7 節列的 freestanding 標頭之一）
+提供的四個工具一筆一筆去拿，不必知道參數實際放在哪裡：</p>
+<pre style="margin:10px 0"><code>va_list ap;              一個「走到哪了」的游標
+va_start(ap, fmt);       初始化：從 fmt 的<b>下一個</b>參數開始
+x = va_arg(ap, int);     取出一個，型別要自己講，游標往前
+va_end(ap);              收尾</code></pre>
+<pre style="margin:10px 0"><code>printf("%d %d", 10, 20);
+
+資料：  [ 10 ][ 20 ]
+          ↑ va_start 之後，游標在這
+va_arg(ap, int)  →  拿出 10，游標往右一格
+va_arg(ap, int)  →  拿出 20</code></pre>
+<p><code>va_arg</code> 的第二個參數是<strong>型別</strong>，不是值——編譯器要靠它決定「這次該從游標讀幾個 byte」。
+型別講錯時，編譯器通常發現不了——它不知道呼叫端到底傳了什麼。實測傳進一個 <code>long</code>、卻用 <code>va_arg(ap, int)</code> 去拿，一個診斷都沒有。</p>
+<p><strong>有一個例外它抓得到：<code>va_arg(ap, char)</code>。</strong>傳進 <code>...</code> 的 <code>char</code> 一定已經被自動提升成 <code>int</code>（這叫<strong>預設參數提升</strong>，<code>short</code> 也一樣），照 <code>char</code> 去拿永遠是錯的，所以 gcc 直接報錯：</p>
+<pre style="margin:10px 0"><code>error: ‘char’ is promoted to ‘int’ when passed through ‘...’ [-Werror]
+note: (so you should pass ‘int’ not ‘char’ to ‘va_arg’)
+note: if this code is reached, the program will abort</code></pre>
+<p>不加 <code>-Werror</code> 硬編過去，那一行會被換成一條 <code>brk #0x3e8</code>，執行到就停。這就是後面 <code>%c</code> 寫 <code>va_arg(ap, int)</code> 的原因。</p>
+<p>這些工具在 AArch64 上<strong>實際被編譯成什麼</strong>，是本節後半的主題——那正是當機的來源。</p>
+</div>
+
+<h3>遇到 <code>%</code>：規格固定是「補零記號、寬度、轉換字元」三部分</h3>
+
+<pre><code>  %    0     5     d
+  │    │     │     └─ 轉換字元：印成什麼（必要）
+  │    │     └─────── 寬度：至少佔幾格（可以沒有）
+  │    └───────────── 補零記號（可以沒有）
+  └────────────────── 開頭</code></pre>
+
+<p>程式碼就照這個順序一部分一部分讀，<code>p</code> 每讀完一部分就往右移：</p>
+
+<pre><code>        p++;                                  <span style="opacity:.6">// 跳過 %</span>
+
+        char fill = ' ';                      <span style="opacity:.6">// 補零記號</span>
+        if (*p == '0') {
+            fill = '0';
+            p++;
+        }
+
+        int width = 0;                        <span style="opacity:.6">// 寬度</span>
+        while (*p &gt;= '0' &amp;&amp; *p &lt;= '9') {
+            width = width * 10 + (*p - '0');
+            p++;
+        }
+
+        switch (*p) {                         <span style="opacity:.6">// 轉換字元</span></code></pre>
+
+<p><code>*p - '0'</code> 是把數字<strong>字元</strong>變成數字<strong>值</strong>：<code>'5'</code> 是 <code>0x35</code>、<code>'0'</code> 是 <code>0x30</code>，相減得到 5。
+多位數時每讀一位就把舊值乘 10 再加上去：</p>
+
+<pre><code>%12d   看到 '1'  width = 0 × 10 + 1 = 1
+       看到 '2'  width = 1 × 10 + 2 = 12</code></pre>
+
+<p>最後的 <code>switch</code> 看轉換字元決定怎麼印：</p>
+
+<div class="tbl">
+<table>
+<tr><th>轉換字元</th><th>從資料拿什麼</th><th>做什麼</th></tr>
+<tr><td><code>c</code></td><td><code>va_arg(ap, int)</code></td><td>補空白到寬度，<code>emit</code> 那個字元</td></tr>
+<tr><td><code>s</code></td><td><code>va_arg(ap, const char *)</code></td><td>交給 <code>put_str</code></td></tr>
+<tr><td><code>d</code></td><td><code>va_arg(ap, int)</code></td><td>先算絕對值，交給 <code>put_num</code>（十進位，並告訴它原本是不是負的）</td></tr>
+<tr><td><code>u</code></td><td><code>va_arg(ap, unsigned int)</code></td><td>交給 <code>put_num</code>（十進位）</td></tr>
+<tr><td><code>x</code></td><td><code>va_arg(ap, unsigned int)</code></td><td>交給 <code>put_num</code>（十六進位）</td></tr>
+<tr><td><code>p</code></td><td><code>va_arg(ap, void *)</code></td><td><code>emit</code> 出 <code>0x</code>，再交給 <code>put_num</code>（十六進位，固定 16 格補零）</td></tr>
+<tr><td><code>%</code></td><td>不拿</td><td><code>emit</code> 一個 <code>%</code></td></tr>
+<tr><td><code>\0</code></td><td>不拿</td><td>模板在 <code>%</code> 後面就結束了：<code>p--</code> 退一格（下面說明）</td></tr>
+<tr><td>其他</td><td>不拿</td><td>原樣印出 <code>%</code> 和那個字元（為什麼危險，見下面〈它擋不住什麼〉）</td></tr>
+</table>
+</div>
+
+<p>表格裡有四個不直覺的地方：</p>
+
+<p><strong>一、<code>%c</code> 和 <code>%s</code> 補的永遠是空白。</strong>它們呼叫 <code>pad</code> 時直接傳 <code>' '</code>，不看 <code>fill</code>。
+寫成 <code>printf("[%05c]", 'Z')</code> 會在編譯時就被擋下。擋它的是 <code>include/printf.h</code> 宣告上的 <strong><code>format</code> 屬性</strong>——一個叫 gcc 拿格式字串去檢查每個呼叫點的標記，本節後面〈<code>format</code> 屬性〉那一小節會細講：</p>
+<pre><code>error: '0' flag used with ‘%c’ gnu_printf format [-Werror=format=]</code></pre>
+<p>把格式字串放進編譯期看不到內容的變數（非 <code>const</code> 的陣列）繞過去，實測 <code>[%05c] [%05s]</code> 配 <code>'Z'</code>、<code>"hi"</code> 印出 <code>[    Z] [   hi]</code>——補零記號被忽略。</p>
+
+<p><strong>二、<code>%p</code> 的寬度被忽略。</strong>程式直接傳 <code>16, '0'</code> 給 <code>put_num</code>，
+不管你寫多寬。實測 <code>[%20p]</code> 配 <code>0x40000000</code> 印出 <code>[0x0000000040000000]</code>，沒有補到 20 格。</p>
+
+<p><strong>三、<code>case 'd': { ... }</code> 那對大括號。</strong>C17 不允許 <code>case</code> 標籤後面直接接變數宣告。
+gcc 11 預設放行，實測加上 <code>-std=c17 -pedantic</code> 才警告：</p>
+<pre><code>warning: a label can only be part of a statement and a declaration is not a statement</code></pre>
+<p>（<code>-std=c2x</code> 則不警告，新標準放寬了。）加大括號是照標準寫，順便把 <code>v</code>、<code>mag</code> 關在這個 case 裡，別的 case 看不到。</p>
+
+<p><strong>四、<code>case '\0': p--;</code></strong>——模板以單獨一個 <code>%</code> 結尾時，例如 <code>"AB%"</code>：</p>
+<pre><code>手指在 %  →  p++ 跳過 %  →  手指在 \0  →  switch 看到 \0</code></pre>
+<p>這時如果直接離開 <code>switch</code>，迴圈會再做一次 <code>p++</code>，手指就<strong>越過結尾</strong>去讀別的記憶體。
+<code>p--</code> 先退回 <code>%</code>，迴圈 <code>p++</code> 之後剛好停在結尾。</p>
+<p>實測拿掉 <code>p--</code>，並在 <code>'\0'</code> 後面刻意放兩個 <code>Z</code>（格式字串要放在非 <code>const</code> 陣列裡、並暫時關掉 <code>-Wformat-security</code>，否則編譯時就被擋下，測不到執行期）：</p>
+<pre><code>有 p--     AB       回傳 2
+沒有 p--   ABZZ     回傳 4     ← 讀過頭，把結尾後面的資料也印出來了</code></pre>
+<p>一般的字串後面通常是對齊用的 <code>00</code>，讀過頭馬上又碰到 0 就停了——<strong>這個 bug 平常是看不見的</strong>，所以實驗得刻意放非零的位元組。</p>
+
+<h3>走一遍：<code>printf("x=%05d\n", -42)</code></h3>
+
+<div class="tbl">
+<table>
+<tr><th>步</th><th>手指 <code>p</code> 指到</th><th>屬於</th><th>做什麼</th><th>印出</th></tr>
+<tr><td>1</td><td><code>x</code></td><td>情況一</td><td><code>emit</code></td><td><code>x</code></td></tr>
+<tr><td>2</td><td><code>=</code></td><td>情況一</td><td><code>emit</code></td><td><code>=</code></td></tr>
+<tr><td>3</td><td><code>%</code></td><td>情況二</td><td><code>p++</code> 跳過</td><td></td></tr>
+<tr><td>4</td><td><code>0</code></td><td>補零記號</td><td><code>fill = '0'</code>，<code>p++</code></td><td></td></tr>
+<tr><td>5</td><td><code>5</code></td><td>寬度</td><td><code>width = 5</code>，<code>p++</code></td><td></td></tr>
+<tr><td>6</td><td><code>d</code></td><td>轉換字元</td><td><code>va_arg</code> 取出 <code>-42</code>，交給 <code>put_num</code>；<code>break</code> 後迴圈 <code>p++</code></td><td><code>-0042</code></td></tr>
+<tr><td>7</td><td><code>\n</code></td><td>情況一</td><td><code>emit</code>（<code>uart_putc</code> 會在前面補 <code>\r</code>）</td><td>換行</td></tr>
+<tr><td>8</td><td><code>\0</code></td><td>—</td><td>迴圈條件不成立，結束</td><td></td></tr>
+</table>
+</div>
+
+<p>實測畫面是 <code>x=-0042</code>，<code>printf</code> 回傳 <strong>8</strong>，但線上實際送出 <strong>9</strong> 個位元組：</p>
+
+<pre><code>78 3d 2d 30 30 34 32 0d 0a
+x  =  -  0  0  4  2  \r \n</code></pre>
+
+<p>差的那一個是 <code>\r</code>。<code>emit</code> 每交出一個字就加一，但 <code>\r</code> 是 <code>uart_putc</code> 在 <code>emit</code> <strong>下面</strong>補的，計數器看不到。</p>
+
+<h3><code>put_num</code>：把一個整數變成字元，分三步</h3>
+
+<pre><code>static void put_num(struct out *o, uint64_t v, unsigned base, int negative,
+                    int width, char fill)</code></pre>
+
+<div class="tbl">
+<table>
+<tr><th>參數</th><th>意思</th></tr>
+<tr><td><code>v</code></td><td>數字的<strong>絕對值</strong>（呼叫前已經轉成正的）</td></tr>
+<tr><td><code>base</code></td><td>10 或 16</td></tr>
+<tr><td><code>negative</code></td><td>原本是不是負數</td></tr>
+<tr><td><code>width</code></td><td>至少佔幾格</td></tr>
+<tr><td><code>fill</code></td><td>不夠寬時補什麼：<code>' '</code> 或 <code>'0'</code></td></tr>
+</table>
+</div>
+
+<p><strong>步驟一：拆出每一位數。</strong></p>
+
+<pre><code>    char buf[NUM_BUF_MAX];
+    int n = 0;
+
+    do {
+        buf[n++] = "0123456789abcdef"[v % base];
+        v /= base;
+    } while (v != 0);</code></pre>
+
+<p>兩個動作一直重複：<code>v % base</code> 取出<strong>最後一位</strong>，<code>v /= base</code> 把<strong>最後一位去掉</strong>。
+<code>"0123456789abcdef"</code> 是一個字串，字串就是 <code>char</code> 陣列，可以直接用 <code>[]</code> 查表：<code>[4]</code> 得到 <code>'4'</code>、<code>[11]</code> 得到 <code>'b'</code>。</p>
+
+<p>用 <code>42</code> 做一次：</p>
+
+<div class="tbl">
+<table>
+<tr><th>圈</th><th><code>v</code></th><th>最後一位 <code>v % 10</code></th><th>存進 <code>buf</code></th><th>去掉最後一位 <code>v / 10</code></th></tr>
+<tr><td>1</td><td>42</td><td>2</td><td><code>'2'</code></td><td>4</td></tr>
+<tr><td>2</td><td>4</td><td>4</td><td><code>'2' '4'</code></td><td>0 → 停</td></tr>
+</table>
+</div>
+
+<p><strong><code>buf</code> 裡是 <code>2 4</code>，反的</strong>——最先拿到的是個位數。
+用 <code>do-while</code> 而不是 <code>while</code>，是因為 <code>v = 0</code> 時 <code>while</code> 一圈都不跑，什麼都不印；<code>do-while</code> 保證至少印出一個 <code>0</code>。</p>
+
+<p><strong>步驟二：處理負號。</strong></p>
+
+<pre><code>    if (negative) {
+        /* A zero fill goes after the sign, a space fill before it. */
+        if (fill == '0') {
+            emit(o, '-');
+            width--;
+        } else {
+            buf[n++] = '-';
+        }
+    }</code></pre>
+
+<p>補零時負號<strong>馬上送出</strong>，並扣掉它佔的一格；補空白時負號<strong>塞進 <code>buf</code> 尾端</strong>，等一下跟數字一起反轉出去。
+兩種擺法不同，是因為結果要長這樣：</p>
+
+<pre><code>%05d  →  -0042     負號在零的「前面」
+%5d   →    -42     負號在空白的「後面」，貼著數字</code></pre>
+
+<p><strong>步驟三：補位，然後反著印。</strong></p>
+
+<pre><code>    pad(o, fill, width - n);
+    while (n-- &gt; 0) {
+        emit(o, buf[n]);
+    }</code></pre>
+
+<p><code>buf</code> 是反的，從最後一格往前讀就變正的。兩個例子走完三步：</p>
+
+<pre><code>                 %05d 配 -42              %5d 配 -42
+步驟一 拆位數    buf = 2 4    n = 2       buf = 2 4    n = 2
+步驟二 負號      送出 '-'，width 5 → 4    buf = 2 4 -  n = 3
+步驟三 補位      pad('0', 4-2) → 0 0      pad(' ', 5-3) → 空白 空白
+       反著印    4 2                      - 4 2
+結果             -0042                      -42</code></pre>
+
+<p>實測兩個都對：<code>x=-0042</code> 與 <code>[  -42]</code>。陣列為什麼是 24 bytes，見本節最後的設計選擇表。</p>
+
+<p><strong>呼叫之前，<code>%d</code> 怎麼算絕對值：</strong></p>
+
+<pre><code>            int v = va_arg(ap, int);
+            /* Negated as unsigned: -INT_MIN overflows as a signed int. */
+            uint64_t mag = (v &lt; 0) ? -(uint64_t)v : (uint64_t)v;
+            put_num(&amp;o, mag, 10, v &lt; 0, width, fill);</code></pre>
+
+<p><code>put_num</code> 只收正數，所以先把 <code>-42</code> 變成 <code>42</code>，再用 <code>v &lt; 0</code> 另外告訴它原本是負的。
+為什麼不直接寫 <code>-v</code>？<code>int</code> 最小是 <code>-2147483648</code>，最大只到 <code>2147483647</code>，
+<code>-(-2147483648)</code> 裝不下，這叫<strong>有號溢位</strong>，是未定義行為。先轉成 64 位元無號數再取負，
+無號數的運算是「繞一圈」有定義的，結果剛好是它的絕對值。實測 <code>printf("%d", INT_MIN)</code> 印出 <code>-2147483648</code>。</p>
+
+<h3><code>format</code> 屬性：它擋得住什麼</h3>
+
+<pre><code>int printf(const char *fmt, ...) __attribute__((<b>format(printf, 1, 2)</b>));
+                                                               ↑  ↑
+                                                               │  └─ 參數從第 2 個開始
+                                                               └──── 格式字串是第 1 個參數</code></pre>
+
+<p>加了這個屬性，gcc 會拿格式字串去<strong>型別檢查每一個呼叫點</strong>，
+<code>-Werror</code> 把不符變成建置失敗。裸機環境沒有別的東西會檢查這些。</p>
+
+<p>實測它有多有效 —— 寫一份臨時的測試程式時，這四行讓 <code>make</code> 直接失敗：</p>
+
+<pre><code>printf("")                error: zero-length gnu_printf format string
+printf("a%")              error: spurious trailing ‘%’ in format
+printf("%q")              error: conversion lacks type at end of format
+printf("%s", (char *)0)   error: ‘%s’ directive argument is null</code></pre>
+
+<p>要測這四個的<strong>執行期</strong>行為，只好把格式字串放進編譯期看不到內容的變數才繞得過。
+<strong>這反過來證明：它只檢查編譯期看得到內容的格式字串。</strong>實測字面值和 <code>const</code> 陣列都會被檢查；換成 <code>const char *</code> 指標或非 <code>const</code> 陣列，同一個錯誤就不報了。</p>
+
+<h3>它擋不住什麼 —— 而且第一個踩到的是我自己</h3>
+
+<div class="callout myth">
+<p>屬性檢查的是「<strong>型別合不合 ISO C</strong>」，不是「<strong>我們這個 printf 有沒有實作</strong>」。</p>
+<p>旗標（<code>-</code> <code>+</code> <code>#</code> 空白）、精度（<code>.n</code>）、長度修飾字（<code>l</code>、<code>hh</code>）
+全都是合法的 ISO printf。gcc 一聲不吭，而我們的解析器把它們丟進 <code>default:</code> 原樣印出 ——
+<strong><code>va_arg</code> 從沒被呼叫，後面每一個參數都往前錯一格。</strong></p>
+<p>實測（建置零警告）：</p>
+<pre style="margin:10px 0"><code>printf("A %%016lx -&gt; [%016lx] then [%d]\n", 0x1fe00000UL, 7);
+printf("B %%-5d   -&gt; [%-5d] then [%d]\n", 42, 7);
+printf("C %%.2s    -&gt; [%.2s] then [%d]\n", "abcdef", 7);
+
+A %016lx -&gt; [%lx] then [<b>534773760</b>]      534773760 = 0x1fe00000，是第一個參數
+B %-5d   -&gt; [%-5d] then [<b>42</b>]            42 跑到第二個位置去了
+C %.2s    -&gt; [%.2s] then [<b>1073744784</b>]   字串<b>指標</b>被當成十進位整數印出來
+                                        （這是個 .rodata 位址，佈局相依，你跑出來會不同）</code></pre>
+<p><strong>A 那一行正是這個 <code>printf</code> 存在的理由</strong> —— 前面才說「M3 要印 <code>ESR_EL1</code>」，
+而真的寫 <code>printf("%016lx", esr)</code> 就會印出四個字元 <code>%lx</code>。</p>
+<p>所以 <code>include/printf.h</code> 的檔頭現在明寫：支援哪幾個、其餘會怎麼壞、以及 format 屬性為什麼擋不住。
+<strong>一個「安全網」最危險的時候，是你以為它蓋住了它其實沒蓋的地方。</strong></p>
+</div>
+
+<h3><code>%s</code> 的寬度對齊：<code>strlen</code> 在這裡被用到</h3>
+
+<p>第 8 節說 <code>strlen</code> 是為了這一節寫的。就是這裡。</p>
+
+<p>〈遇到 <code>%</code>〉那一小節讀出來的寬度，對字串也適用：</p>
+
+<pre><code>printf("[%6s]", "hi")    →   [    hi]     不夠 6 格，左邊補 4 個空白
+printf("[%2s]", "hello") →   [hello]      已經超過 2 格，不截斷</code></pre>
+
+<p>要補幾個空白，得先知道字串有多長——<strong>而「知道字串有多長」就是 <code>strlen</code></strong>。
+<code>lib/printf.c</code> 裡負責這件事的是 <code>put_str()</code>，它用到的 <code>emit</code>、<code>pad</code> 前面看過了：</p>
+
+<pre><code>static void put_str(struct out *o, const char *s, int width)
+{
+    if (s == NULL) {
+        s = "(null)";        <span style="opacity:.6">// 印字面文字，不是讀位址 0</span>
+    }
+
+    int len = (int)<b>strlen(s)</b>;      <span style="opacity:.6">// ← 上一節那四個函式的第一個真實呼叫點</span>
+
+    pad(o, ' ', width - len);      <span style="opacity:.6">// 補 width-len 個空白</span>
+    for (int i = 0; i &lt; len; i++) {
+        emit(o, s[i]);
+    }
+}</code></pre>
+
+<p><code>pad()</code> 收到負數不動作，所以 <code>width</code> 比 <code>len</code> 小的時候
+（上面 <code>%2s</code> 對 <code>"hello"</code> 那個例子）自然就是不補、不截斷。</p>
+
+<p><strong>那個 <code>if (s == NULL)</code> 為什麼在？</strong> 前面〈<code>format</code> 屬性〉那一小節說過，<code>printf("%s", (char *)0)</code>
+會被 <code>format</code> 屬性當場擋下、<code>make</code> 直接失敗——照「拿掉它現在會壞嗎」的判準，
+它應該是死碼。但屬性<strong>只檢查編譯期看得到內容的格式字串</strong>：只要格式字串是個指標變數，
+或那個 <code>NULL</code> 是執行時才算出來的指標，屬性一個字都不會說。
+真讓它讀位址 0，M5 開了 MMU 之後就是一次 fault。這一行擋的是那種情況。</p>
+
+<p><strong>但要說清楚一件事：這條路徑開機時並不會走到。</strong>
+<code>kernel_main</code> 印的是 <code>printf("Hello, AArch64 from EL1\n")</code>，
+裡面沒有 <code>%s</code>，所以 <code>switch</code> 不會進 <code>case 's':</code>，
+<code>put_str</code> 和 <code>strlen</code> 一條指令都不會執行。實測用 GDB 下斷點：</p>
+
+<pre><code>break emit       開機時<b>命中</b>      ← 對照組，證明手法有效
+break put_str    <b>從未命中</b>
+break strlen     <b>從未命中</b>
+序列埠仍然印出   Hello, AArch64 from EL1</code></pre>
+
+<p>那 <code>strlen</code> 現在到底是不是「有作用」的？<strong>是，但作用在連結期，不在執行期。</strong>
+把 <code>lib/string.c</code> 裡的 <code>strlen</code> 刪掉再建置：</p>
+
+<pre><code>printf.c:(.text+0xb0): <b>undefined reference to `strlen'</b>
+collect2: error: ld returned 1 exit status</code></pre>
+
+<p>連結器不管那條 <code>bl</code> 會不會被執行到，它只看到 <code>put_str</code> 裡有一個
+對 <code>strlen</code> 的參照，就要求有人提供。<strong>「binary 裡有 <code>bl X</code>」和
+「X 會被執行」是兩件不同的事</strong>。第 10 節直覺 10 專門講這條界線。</p>
+
+<p class="sub">所以 <code>strlen</code> 是第 8 節那四個裡面唯一「拿掉現在就會壞」的一個，只是壞在建置階段；把 <code>memset</code> 刪掉，建置照樣成功。
+<code>memset</code>、<code>memcpy</code>、<code>strcmp</code> 到<strong>寫下這段為止</strong>都還沒有呼叫者——
+M2 還有輸入 echo 與 <code>panic()</code> 兩包沒寫，那兩包會不會用到，等寫了才知道
+（第 7 節有兩個同款預測，兩個都猜錯了）。這是提前寫它們要付的代價，第 8 節開頭有說明。</p>
+
+<h3>印中文：<code>printf</code> 不認字，只搬 byte</h3>
+
+<p>上一小節的 <code>put_str</code> 靠 <code>strlen</code> 算長度來補空白。那印中文會怎樣？
+<strong><code>printf</code> 和 UART 完全不做編碼轉換</strong>——它們只把位元組（byte，8 個 bit）一個一個搬出去。
+真正把位元組「看成字」的，是你電腦上的終端機。</p>
+
+<p class="sub">先講兩個名詞。<strong>編碼</strong>是「哪個 byte 代表哪個字」的對照規則。<strong>ASCII</strong> 是最早的一套，只有英文字母、數字和符號，每個字 1 個 byte，值都小於 <code>0x80</code>。<strong>UTF-8</strong> 是目前最通用的一套：ASCII 那些字照舊用 1 個 byte，中文等其他文字用 2 到 4 個 byte。你的編輯器、gcc 和終端機預設都用 UTF-8。</p>
+
+<p>一個「中」字從原始碼到螢幕經過四站。實測每一站存的東西：</p>
+
+<pre><code>站 1  編輯器存檔        原始碼檔案裡      e4 b8 ad             UTF-8
+站 2  gcc 編譯          .rodata 裡        e4 b8 ad 0a 00       "中\n" 加上字串結尾
+站 3  printf → UART     線上送出          e4 b8 ad 0d 0a       \n 前面被補了 \r
+站 4  終端機            照 UTF-8 解讀     畫出「中」</code></pre>
+
+<p>前三站的 <code>e4 b8 ad</code> 一模一樣，中間沒有任何人改過它。在 <code>printf</code> 眼裡這是 <strong>3 個 <code>char</code></strong>，它不知道那是一個字。</p>
+
+<div class="tbl">
+<table>
+<tr><th></th><th>編碼</th><th>幾個 byte</th></tr>
+<tr><td><code>A</code></td><td>ASCII <code>0x41</code></td><td>1</td></tr>
+<tr><td><code>中</code></td><td>UTF-8 <code>e4 b8 ad</code></td><td>3</td></tr>
+</table>
+</div>
+
+<p>C 的 <code>char</code> 是 <strong>1 個 byte，不是 1 個字</strong>。英文剛好一個字一個 byte，中文不是。這造成三個後果，都實測過：</p>
+
+<pre><code>strlen("A") = 1      strlen("中") = 3      strlen("中文") = 6
+
+printf("[%6s]", "hi")     →  [    hi]     補 6-2 = 4 個空白
+printf("[%6s]", "中文")   →  [中文]       6-6 = 0，一個都沒補
+
+printf("%c", '中');       →  error: multi-character character constant [-Werror=multichar]</code></pre>
+
+<p>第一個後果是 <code>strlen</code> 數的是 byte，不是字。第二個後果由它而來：<code>put_str</code> 以為「中文」已經 6 格寬了，但終端機通常把一個中文字畫成兩格寬，看起來只佔 4 格——<strong>寬度是用 byte 算的，不是用眼睛看到的格數算的</strong>。
+第三個後果：<code>%c</code> 印的是 1 個 <code>char</code>，而 <code>'中'</code> 在單引號裡塞了 3 個 byte。gcc 對這種寫法給的是 <code>-Wmultichar</code> 警告，本專案的 <code>-Werror</code> 把它升成錯誤（不加 <code>-Werror</code> 會照樣編過）。</p>
+
+<p><strong>那為什麼中文沒被 <code>\n</code> 轉換或字串結尾切斷？</strong> 程式裡有兩個地方在認特定的 byte：</p>
+
+<pre><code>uart_putc    if (c == '\n')    看到 0x0a 就先補 \r
+printf       *p != '\0'        看到 0x00 就停</code></pre>
+
+<p>如果中文的某個 byte 剛好是 <code>0x0a</code> 或 <code>0x00</code>，字就會被切斷或插進怪東西。這不會發生，是 UTF-8 刻意設計的：
+<strong>多 byte 的字，每一個 byte 都 ≥ <code>0x80</code></strong>（<code>e4</code>、<code>b8</code>、<code>ad</code> 都是），
+所以永遠不會撞到 ASCII 的控制字元。這也是 UTF-8 能跟既有 C 字串程式碼相容的原因。</p>
+
+<p class="sub"><code>uart_putc_raw</code> 寫 DR 前的 <code>(unsigned char)c</code> 跟這有關：<code>0xe4</code> 這種 ≥ <code>0x80</code> 的 byte，
+如果 <code>char</code> 是有號的就會變成負數。AArch64 的 <code>char</code> 本來就是無號，所以現在不會出事——跟第 8 節 <code>strcmp</code> 那個轉型是同一件事。</p>
+
+<p><strong>編碼到底是誰決定的？兩端，中間的核心不管。</strong>送出那端是 gcc 決定字串存成什麼 byte（預設 UTF-8）；接收那端是終端機決定怎麼解讀。
+實測讓 gcc 改用 <strong>Big5</strong>（台灣早期常用的中文編碼，一個中文字 2 個 byte）存同一個「中」：</p>
+
+<pre><code>-fexec-charset=UTF-8   →  e4 b8 ad
+-fexec-charset=BIG5    →  a4 a4</code></pre>
+
+<p>核心照樣把 <code>a4 a4</code> 送出去，終端機若是 UTF-8 就會顯示亂碼。<strong>亂碼不是核心的錯，是兩端沒約好。</strong>
+M9 換到樹莓派也一樣：USB 轉 TTL 線、<code>picocom</code>（在電腦上開序列埠的小程式）、終端機，中間每一段都只搬 byte，認字的還是最後那個終端機。</p>
+
+<h3>後半的起點：可變參數在 AArch64 怎麼傳</h3>
+
+<p><strong>到這裡，<code>printf</code> 怎麼運作講完了。</strong>本節後半是它寫完之後發生的事：<strong>核心當掉了</strong>——原因跟上面那些邏輯完全無關。下面照著當時的順序走一遍，起點是可變參數在 AArch64 上怎麼傳。</p>
+
+<p class="sub">（先說清楚：這次當機是在一份臨時的測試程式裡撞到的。它為什麼<strong>也</strong>是交付版的問題——
 以及它一度<strong>不是</strong>——見第 10 節直覺 10 與直覺 11。）</p>
-
-<h3>可變參數在 AArch64 怎麼傳</h3>
 
 <p>AAPCS64（ARM 64 位元的呼叫慣例）規定：</p>
 
 <pre><code>前 8 個<b>整數</b>參數      x0 – x7
 前 8 個<b>浮點</b>參數      q0 – q7      ← 注意這一行
 多出來的                 堆疊</code></pre>
+
+<p>前半 va_list 說明框裡那排 <code>[ 10 ][ 20 ]</code>，是 <code>va_arg</code> 讓你看到的樣子。實測 <code>printf("%d %d", 10, 20)</code> 這個呼叫反組譯出來是：</p>
+
+<pre><code>mov   w2, #0x14      // #20    第三個參數 → x2
+mov   w1, #0xa       // #10    第二個參數 → x1
+adrp  x0, ...                  格式字串   → x0
+add   x0, x0, ...
+bl    printf</code></pre>
+<p class="sub"><code>w1</code>、<code>w2</code> 是 <code>x1</code>、<code>x2</code> 的低 32 位元（第 4 節講過 CPU 暫存器的寬度），<code>int</code> 只用得到這一半。</p>
+
+<p>資料其實不在一排連續的記憶體裡，而是散在暫存器上。<code>va_arg</code> 替你去拿——更精確地說，是去拿它們被<strong>存起來</strong>的那個地方。存在哪、怎麼存，就是當機的起點。</p>
 
 <div class="callout">
 <span class="lbl">q0 和 v0 是同一個暫存器</span>
@@ -1037,22 +1546,8 @@ q0   當成完整的 128 bit 看     <b>← 存／取整顆時用這個名字</b
 d0   只用低 64 bit（double）
 s0   只用低 32 bit（float）
 h0 / b0   低 16 / 低 8 bit</code></pre>
-<p>所以下面說「參數走 <code>q0</code>–<code>q7</code>」（8 個）和後面算成本說「<code>v0</code>–<code>v31</code>」（32 個）沒有矛盾：
+<p>所以上面說「參數走 <code>q0</code>–<code>q7</code>」（8 個）和後面算成本說「<code>v0</code>–<code>v31</code>」（32 個）沒有矛盾：
 <strong>傳參數只用前 8 顆，但要保存狀態時 32 顆都得存。</strong></p>
-</div>
-
-<div class="callout">
-<span class="lbl">C 層的三個工具：va_list / va_start / va_arg</span>
-<p>C 不讓你直接讀 <code>x0</code>–<code>x7</code>。<code>&lt;stdarg.h&gt;</code>（第 7 節列的自由環境標頭之一）
-提供三個東西把那件事包起來：</p>
-<pre style="margin:10px 0"><code>va_list ap;              一個「走到哪了」的游標
-va_start(ap, fmt);       初始化：從 fmt 的<b>下一個</b>參數開始
-x = va_arg(ap, int);     取出一個，型別要自己講，游標往前
-va_end(ap);              收尾</code></pre>
-<p><code>va_arg</code> 的第二個參數是<strong>型別</strong>，不是值——編譯器要靠它決定「這次該從游標讀幾個 byte」。
-講錯型別不會有警告，只會讀錯位置，後面全跟著錯。這就是後面 <code>%c</code> 為什麼要寫
-<code>va_arg(ap, int)</code> 而不是 <code>char</code> 的原因。</p>
-<p>底下講的是這三個巨集在 AArch64 上<strong>實際被編譯成什麼</strong>——那才是當機的來源。</p>
 </div>
 
 <p><code>printf</code> 在執行到 <code>va_start</code> 之前，並不知道格式字串裡會要幾個參數、什麼型別。
@@ -1095,7 +1590,7 @@ M3 要親手蓋這張表，那時 16 個入口都會碰到。</p>
 </table>
 </div>
 
-<p>我們從來沒設定過它，所以它是 <code>0b00</code>。實測（核心自己 <code>mrs</code> 讀出來印）：</p>
+<p>我們從來沒設定過它，所以它是 <code>0b00</code>。實測（在臨時的測試程式裡，用 <code>mrs</code> 讀出來、再用一段自己寫的十六進位轉換印出來——<code>printf</code> 還不支援 <code>%lx</code>，而且呼叫它就會當機）：</p>
 
 <pre><code>CPACR_EL1 = 0000000000000000
 calling printf...
@@ -1140,8 +1635,8 @@ COND = bits[23:20] = 0b1110           AL（無條件執行）</code></pre>
 <div class="tbl">
 <table>
 <tr><th>修法</th><th>代價</th></tr>
-<tr><td><code>-mgeneral-regs-only</code></td><td>編譯器完全不產生 FP/SIMD 指令</td></tr>
-<tr><td>在 <code>boot.S</code> 設 <code>CPACR_EL1.FPEN = 0b11</code></td><td>每次中斷與 context switch 都要多存 520 bytes（見下段。<strong>這一格是論證，不是實測</strong> —— M4 的中斷與 M7 的 context switch 都還不存在）</td></tr>
+<tr><td><code>-mgeneral-regs-only</code></td><td>核心程式碼不能用浮點（見下面說明框）；編譯器從此不產生 FP/SIMD 指令</td></tr>
+<tr><td>在 <code>boot.S</code> 設 <code>CPACR_EL1.FPEN = 0b11</code></td><td>只要中斷處理常式可能碰到 FP，每次中斷與 context switch 就都要多存 520 bytes（見下段。<strong>這一格是論證，不是實測</strong> —— M4 的中斷與 M7 的 context switch 都還不存在）</td></tr>
 </table>
 </div>
 
@@ -1157,147 +1652,52 @@ FP 狀態    v0–v31（各 128 bit）+ FPSR + FPCR     <b>520 bytes</b>
 只要處理常式裡有一條 FP 指令，它就會蓋掉被中斷的那個執行緒的 <code>v</code> 暫存器，
 於是<strong>每一次進中斷</strong>都得先存那 520 bytes，即使那次中斷根本沒碰 FP。</p>
 
-<p>Linux 的做法是：核心<strong>可以</strong>用 FP，但必須包在 <code>kernel_fpu_begin()</code> 與
-<code>kernel_fpu_end()</code> 中間，由那對函式負責存檔。我們沒有那對函式，也還沒有中斷，
-所以整個關掉，把這個問題留到 M7 真的有 context switch 時再面對。</p>
-
-<h3><code>format</code> 屬性：它擋得住什麼</h3>
-
-<pre><code>int printf(const char *fmt, ...) __attribute__((<b>format(printf, 1, 2)</b>));
-                                                        ↑  ↑
-                                          格式字串是第 1 個參數
-                                                    參數從第 2 個開始</code></pre>
-
-<p>加了這個屬性，gcc 會拿格式字串去<strong>型別檢查每一個呼叫點</strong>，
-<code>-Werror</code> 把不符變成建置失敗。裸機環境沒有別的東西會檢查這些。</p>
-
-<p>實測它有多有效 —— 寫自我測試時，這四行讓 <code>make</code> 直接失敗：</p>
-
-<pre><code>printf("")           error: zero-length gnu_printf format string
-printf("a%")         error: spurious trailing '%' in format
-printf("%q")         error: conversion lacks type at end of format
-printf("%s", NULL)   error: '%s' directive argument is null</code></pre>
-
-<p>要測這四個的<strong>執行期</strong>行為，只好把格式字串放進變數才繞得過。
-<strong>這反過來證明：它只檢查字面值。</strong> 格式字串一旦是變數，保護就完全消失。</p>
-
-<h3>它擋不住什麼 —— 而且第一個踩到的是我自己</h3>
-
-<div class="callout myth">
-<p>屬性檢查的是「<strong>型別合不合 ISO C</strong>」，不是「<strong>我們這個 printf 有沒有實作</strong>」。</p>
-<p>旗標（<code>-</code> <code>+</code> <code>#</code> 空白）、精度（<code>.n</code>）、長度修飾字（<code>l</code>、<code>hh</code>）
-全都是合法的 ISO printf。gcc 一聲不吭，而我們的解析器把它們丟進 <code>default:</code> 原樣印出 ——
-<strong><code>va_arg</code> 從沒被呼叫，後面每一個參數都往前錯一格。</strong></p>
-<p>實測（建置零警告）：</p>
-<pre style="margin:10px 0"><code>printf("A %%016lx -&gt; [%016lx] then [%d]\n", 0x1fe00000UL, 7);
-printf("B %%-5d   -&gt; [%-5d] then [%d]\n", 42, 7);
-printf("C %%.2s    -&gt; [%.2s] then [%d]\n", "abcdef", 7);
-
-A %016lx -&gt; [%lx] then [<b>534773760</b>]      534773760 = 0x1fe00000，是第一個參數
-B %-5d   -&gt; [%-5d] then [<b>42</b>]            42 跑到第二個位置去了
-C %.2s    -&gt; [%.2s] then [<b>1073744784</b>]   字串<b>指標</b>被當成十進位整數印出來
-                                        （這是個 .rodata 位址，佈局相依，你跑出來會不同）</code></pre>
-<p><strong>A 那一行正是這個 <code>printf</code> 存在的理由</strong> —— 前面才說「M3 要印 <code>ESR_EL1</code>」，
-而真的寫 <code>printf("%016lx", esr)</code> 就會印出四個字元 <code>%lx</code>。</p>
-<p>所以 <code>include/printf.h</code> 的檔頭現在明寫：支援哪幾個、其餘會怎麼壞、以及 format 屬性為什麼擋不住。
-<strong>一個「安全網」最危險的時候，是你以為它蓋住了它其實沒蓋的地方。</strong></p>
-</div>
-
-<h3><code>%s</code> 的寬度對齊：<code>strlen</code> 在這裡被用到</h3>
-
-<p>第 8 節說 <code>strlen</code> 是為了這一節寫的。就是這裡。</p>
-
-<p>「最小寬度」是格式規格裡數字的那一段：<code>%5d</code> 的意思是「至少佔 5 格，不夠的補空白」。
-對數字和字串都適用：</p>
-
-<pre><code>printf("[%6s]", "hi")    →   [    hi]     不夠 6 格，左邊補 4 個空白
-printf("[%2s]", "hello") →   [hello]      已經超過 2 格，不截斷</code></pre>
-
-<p>要補幾個空白，得先知道字串有多長——<strong>而「知道字串有多長」就是 <code>strlen</code></strong>。
-<code>lib/printf.c</code> 裡負責這件事的是 <code>put_str()</code>。</p>
-
-<p>在讀它之前先認識兩個它會用到的內部函式——都是 <code>static</code>，只在這個檔案裡活動：</p>
-
-<pre><code>struct out { int count; };   <b>唯一的欄位：到目前為止送出了幾個字元</b>
-
-static void emit(struct out *o, char c)         送一個字元，順便計數
-{
-    uart_putc(c);
-    o-&gt;count++;
-}
-
-static void pad(struct out *o, char c, int n)   送 n 個 c；n &lt;= 0 就一個都不送
-{
-    while (n-- &gt; 0) {
-        emit(o, c);
-    }
-}</code></pre>
-
-<p><code>struct out</code> 只是一個計數器。<code>printf</code> 依標準要回傳「總共印了幾個字元」，
-而真正送字的地方散在好幾個函式裡，所以拿一個指標一路傳下去，每送一個字就加一。
-（為什麼不乾脆用全域變數？見本節最後那張設計選擇表。）</p>
+<p>Linux 的做法跟我們一樣是<strong>全域關掉</strong>：arm64 的 <code>arch/arm64/Makefile</code> 就把 <code>-mgeneral-regs-only</code> 加進所有核心程式碼的編譯旗標。差別在它多了一套<strong>例外機制</strong>：少數真的需要浮點的檔案，在 Makefile 裡個別把這個旗標拿掉，並把浮點程式碼包在 <code>kernel_fpu_begin()</code> 與 <code>kernel_fpu_end()</code> 中間，由那對函式負責存檔。那對函式只能在行程的上下文裡呼叫，不能在中斷處理常式裡用——正好對上面那段「中斷裡碰 FP 最貴」的論證。</p>
+<p class="sub">以 Linux 主線原始碼為準：<code>Documentation/core-api/floating-point.rst</code> 規定個別檔案的寫法；arm64 的 <code>kernel_fpu_begin()</code> 定義在 <code>arch/arm64/include/asm/fpu.h</code>，實際呼叫 <code>kernel_neon_begin(NULL)</code>（它有一個參數，這裡傳空指標）。</p>
+<p>我們沒有那一套例外機制，也還沒有中斷，所以<strong>不開例外</strong>，把這個問題留到 M7 真的有 context switch 時再面對。</p>
 
 <div class="callout">
-<span class="lbl">pad 的 while (n-- &gt; 0) 跟第 8 節那個長得一樣，但安全的理由相反</span>
-<p>第 8 節講 <code>memset</code> 時說：這樣寫是因為 <code>n</code> 是 <code>size_t</code>（<strong>無號</strong>），
-寫成 <code>while (--n)</code> 的話 <code>n = 0</code> 會變成 <code>0xffffffffffffffff</code>。</p>
-<p><code>pad</code> 的 <code>n</code> 是 <code><b>int</b></code>（<strong>有號</strong>）。而且它<strong>本來就會收到負數</strong>——
-<code>width - len</code> 在「寬度比字串短」時就是負的。有號數不會繞回去，<code>-3 &gt; 0</code> 為假，迴圈直接不跑。</p>
-<p><strong>同一個寫法，一邊靠「無號不能減到負的」、一邊靠「有號可以是負的」。</strong>
-這也是為什麼上面 <code>%2s</code> 對 <code>"hello"</code> 那個例子不需要任何額外判斷就不會截斷。</p>
-</div>
+<span class="lbl">那核心裡還能寫 float 嗎？</span>
+<p><strong>在這個專案裡，用到浮點值的程式碼編不過。</strong>Linux 靠上面那套例外機制讓少數檔案能用；我們沒有，所以沒有例外。
+加了 <code>-mgeneral-regs-only</code> 之後，在本專案現在的 <code>-O0</code> 下實測：</p>
+<pre style="margin:10px 0"><code>int f(int a) { float x = a; x = x * 2.5f; ... }   error: ‘-mgeneral-regs-only’ is incompatible
+                                                         with the use of floating-point types
+函式裡寫 float x = 1.5f; 並用到 x                  同上（-O1 以上 x 被最佳化掉就通過，見下面規則）
+double g(double d) { return d; }                   同上
 
-<pre><code>static void put_str(struct out *o, const char *s, int width)
+enum { K = (int)(2.5 * 4) };        通過   ← 編譯期就算完，只留下整數 10
+sizeof(float)                       通過   ← 只問大小
+float gx = 1.5f;    （檔案範圍）     通過   ← 只是一塊資料，浮點指令 0 條
+double g(double d); （只有宣告）     通過   ← 沒有程式碼</code></pre>
+<p>規則是：<strong>會產生浮點指令的寫法編不過</strong>；不產生指令的（編譯期常數、只放資料、只有宣告）它不管。所以結果會隨最佳化等級變：同一行 <code>float x = 1.5f;</code>，<code>-O0</code> 會產生指令而報錯，<code>-O1</code> 以上整行被刪掉就通過。（照字面只寫這一行、沒用到 <code>x</code>，第一個錯誤會是 <code>unused variable ‘x’</code>，那是 <code>-Werror</code> 的另一條規則。）</p>
+<p>這其實是好事：<strong>旗標把「執行期當機」提前成「編譯期錯誤」</strong>。實測拿掉旗標，跑這段一定要在執行期才算得出來的浮點運算：</p>
+<pre style="margin:10px 0"><code>int seed = 3;                        // 檔案範圍：別的檔案可能改它，編譯器不能先把結果算好
+
+void kernel_main(void)
 {
-    if (s == NULL) {
-        s = "(null)";        <span style="opacity:.6">// 印字面文字，不是讀位址 0</span>
-    }
-
-    int len = (int)<b>strlen(s)</b>;      <span style="opacity:.6">// ← 上一節那四個函式的第一個真實呼叫點</span>
-
-    pad(o, ' ', width - len);      <span style="opacity:.6">// 補 width-len 個空白</span>
-    for (int i = 0; i &lt; len; i++) {
-        emit(o, s[i]);
-    }
+    uart_init();
+    uart_puts("before float\n");    // 用 uart_puts 印，理由見下面小字
+    float x = seed;
+    x = x * 2.5f;
+    ...
 }</code></pre>
-
-<p><code>pad()</code> 收到負數不動作，所以 <code>width</code> 比 <code>len</code> 小的時候
-（上面 <code>%2s</code> 對 <code>"hello"</code> 那個例子）自然就是不補、不截斷。</p>
-
-<p><strong>那個 <code>if (s == NULL)</code> 為什麼在？</strong> 前面才說 <code>printf("%s", NULL)</code>
-會被 <code>format</code> 屬性當場擋下、<code>make</code> 直接失敗——照鐵則五「拿掉現在會壞嗎」，
-它應該是死碼。但屬性<strong>只檢查字面值的格式字串</strong>：只要格式字串是變數，
-或那個 <code>NULL</code> 是執行時才算出來的指標，屬性一個字都不會說。
-真讓它讀位址 0，M5 開了 MMU 之後就是一次 fault。這一行擋的是那種情況。</p>
-
-<p><strong>但要說清楚一件事：這條路徑開機時並不會走到。</strong>
-<code>kernel_main</code> 印的是 <code>printf("Hello, AArch64 from EL1\n")</code>，
-裡面沒有 <code>%s</code>，所以 <code>switch</code> 不會進 <code>case 's':</code>，
-<code>put_str</code> 和 <code>strlen</code> 一條指令都不會執行。實測用 GDB 下斷點：</p>
-
-<pre><code>break emit       開機時<b>命中</b>      ← 對照組，證明手法有效
-break put_str    <b>從未命中</b>
-break strlen     <b>從未命中</b>
-序列埠仍然印出   Hello, AArch64 from EL1</code></pre>
-
-<p>那 <code>strlen</code> 現在到底是不是「有作用」的？<strong>是，但作用在連結期，不在執行期。</strong>
-把 <code>lib/string.c</code> 裡的 <code>strlen</code> 刪掉再建置：</p>
-
-<pre><code>printf.c:(.text+0xb0): <b>undefined reference to `strlen'</b>
-collect2: error: ld returned 1 exit status</code></pre>
-
-<p>連結器不管那條 <code>bl</code> 會不會被執行到，它只看到 <code>put_str</code> 裡有一個
-對 <code>strlen</code> 的參照，就要求有人提供。<strong>「binary 裡有 <code>bl X</code>」和
-「X 會被執行」是兩件不同的事</strong>——第 10 節直覺 10 講的正是同一條界線
-（那 8 條 <code>str q</code> 存在，但在第一版的樹上永遠不會被執行）。</p>
-
-<p class="sub">所以 <code>strlen</code> 是四個裡面唯一「拿掉現在就會壞」的一個，只是壞在建置階段。
-另外三個連這個都沒有：把 <code>memset</code> 刪掉，建置照樣成功。</p>
-
-<p class="sub">第 8 節那四個函式裡，只有 <code>strlen</code> 走到了這一步。
-<code>memset</code>、<code>memcpy</code>、<code>strcmp</code> 到<strong>寫下這段為止</strong>都還沒有呼叫者——
-M2 還有輸入 echo 與 <code>panic()</code> 兩包沒寫，那兩包會不會用到，等寫了才知道
-（第 7 節有兩個同款預測，兩個都猜錯了）。這是提前寫它們要付的代價，第 8 節開頭有說明。</p>
+<pre style="margin:10px 0"><code>序列埠       before float        ← 之後就沒了
+ESR_EL1      0x1fe00000          ← 跟上面 printf 那次一模一樣，EC = 0x07
+當掉的指令   ldr s0, [x0]        ← 把 seed 的 32 個 bit 原封載入浮點暫存器 s0
+                                   （前兩條 adrp/add 讓 x0 = seed 的位址；下一條 scvtf s0, s0 才把它轉成 float）</code></pre>
+<p class="sub">細節會隨寫法變。<code>seed</code> 改成函式裡的區域變數，當掉的指令變成 <code>ldr s0, [sp, #28]</code>（從堆疊上讀）；
+印字改用 <code>printf</code>，序列埠會是全空的，因為 <code>printf</code> 的序言先存 <code>q0</code> 就 trap 了（停在 <code>printf+40</code>，就是上面那次當機）。
+三種寫法的 <code>ESR_EL1</code> 都是 <code>0x1fe00000</code>。</p>
+<p>沒有旗標，這種錯要等執行到那一行才炸；有旗標，<code>make</code> 就擋下來了。</p>
+<p><strong>要算小數怎麼辦？用整數。</strong>這個專案其實已經這樣做過。第 5 節的鮑率除數算出來是 13.0208，
+程式沒有用浮點，而是改用「1/64」當單位，存成整數 <code>div64 = 833</code>：</p>
+<pre style="margin:10px 0"><code>833 / 64 = 13              整數部，寫進 IBRD
+833 % 64 = 1               小數部「64 分之 1」，寫進 FBRD
+13 又 1/64 = 13.015625     用來逼近 13.0208</code></pre>
+<p><strong>把小數固定乘上一個倍數、用整數存起來</strong>，這叫<strong>定點數</strong>。核心裡要算比例、時間、頻率時，常用的就是這一招。</p>
+<p class="sub">以後使用者程式（M8 的 EL0）要不要能用浮點，到時候再決定。若要開放，核心得打開 <code>CPACR_EL1.FPEN</code>，
+並在切換行程時替每個行程存下 <code>v0</code>–<code>v31</code> 加上 <code>FPSR</code>、<code>FPCR</code>，也就是上面算過的那 520 bytes。</p>
+</div>
 
 <h3>幾個小的設計選擇</h3>
 
@@ -1307,9 +1707,8 @@ M2 還有輸入 echo 與 <code>panic()</code> 兩包沒寫，那兩包會不會�
 <tr><td>不做行緩衝，直接 <code>uart_putc</code></td><td>沒有 heap；而且當機前的最後一行必須<strong>已經送出去</strong>。有緩衝的 printf 在 panic 路徑上會吞掉最重要的那一行</td></tr>
 <tr><td>字元計數放 <code>struct out</code>，不用全域變數</td><td>M4 會加中斷。共用計數器會讓 <code>printf</code> 不能從處理常式裡呼叫</td></tr>
 <tr><td><code>put_num()</code>：數字由<strong>低位往高位</strong>產生，寫進區域陣列，再反向讀出來</td><td>除以 10 先得到的是個位數，順序天生是反的。反向讀一遍，比每次把新數字插到前面、搬移整個緩衝區便宜</td></tr>
-<tr><td>那個陣列是 24 bytes</td><td>逐項算最壞情況：<code>%d</code> 的絕對值最大 2147483648（10 位數），<code>fill</code> 不是 <code>'0'</code> 時負號也進陣列，共 11；<code>%u</code>／<code>%x</code> 是 10／8 位；<code>%p</code> 是 16 位十六進位，<strong>它的 <code>0x</code> 直接送出去、不進陣列</strong>。64 位元的最壞情況是 <strong>20</strong>：<code>%lu</code> 的 <code>UINT64_MAX</code> 是 20 位數但<strong>無號、沒有符號</strong>；<code>%ld</code> 的 <code>INT64_MIN</code> 絕對值只有 19 位，加符號才 20。<strong>沒有任何格式做得到 21</strong>——<code>lib/printf.c</code> 的註解原本寫「20-digit uint64_t plus a sign」，把無號和有號混在一起了，已改。最壞 20 &lt; 24</td></tr>
-<tr><td>負數先轉無號再取絕對值</td><td><code>-v</code> 在 <code>v == INT_MIN</code> 時是有號溢位（未定義行為）。<code>-O2</code> 下 gcc 可能把整段刪掉</td></tr>
-<tr><td><code>%c</code> 用 <code>va_arg(ap, int)</code></td><td>可變參數有「預設參數提升」：<code>char</code> 和 <code>short</code> 一律升成 <code>int</code>。寫 <code>char</code> 是未定義行為，而且在 QEMU 上多半剛好會動</td></tr>
+<tr><td><code>put_num</code> 的數字陣列是 24 bytes（<code>NUM_BUF_MAX</code>）</td><td>逐項算最壞情況：<code>%d</code> 的絕對值最大 2147483648（10 位數），<code>fill</code> 不是 <code>'0'</code> 時負號也進陣列，共 11；<code>%u</code>／<code>%x</code> 是 10／8 位；<code>%p</code> 是 16 位十六進位，<strong>它的 <code>0x</code> 直接送出去、不進陣列</strong>。64 位元的最壞情況是 <strong>20</strong>：<code>%lu</code> 的 <code>UINT64_MAX</code> 是 20 位數但<strong>無號、沒有符號</strong>；<code>%ld</code> 的 <code>INT64_MIN</code> 絕對值只有 19 位，加符號才 20。<strong>沒有任何格式做得到 21</strong>——<code>lib/printf.c</code> 的註解原本寫「20-digit uint64_t plus a sign」，把無號和有號混在一起了，已改。最壞 20 &lt; 24</td></tr>
+<tr><td><code>%c</code> 用 <code>va_arg(ap, int)</code></td><td>預設參數提升：傳進 <code>...</code> 的 <code>char</code>、<code>short</code> 一律升成 <code>int</code>。寫 <code>va_arg(ap, char)</code> 在本專案旗標下建置失敗；硬編過去會變成 <code>brk</code>，執行到就停（前面 va_list 說明框有實測）</td></tr>
 <tr><td>不支援 <code>%ld</code>、<code>%lx</code></td><td>現在沒有東西要印 64 位元數值。M3 印系統暫存器時再加</td></tr>
 </table>
 </div>
@@ -1322,7 +1721,6 @@ M2 還有輸入 echo 與 <code>panic()</code> 兩包沒寫，那兩包會不會�
 <p>會特別留著它們，是因為<strong>「原本以為 A、實際是 B」比「B 是對的」有用得多</strong>——
 你三個月後重讀，多半也會先想到 A。前五則是寫第一包（UART）期間發現的，後七則來自
 <code>string.c</code> 與 <code>printf</code> 這兩包，也就是第 8、9 節的內容。</p>
-
 
 <div class="callout myth">
 <span class="lbl">直覺 1</span>
@@ -1495,7 +1893,7 @@ SP 對齊歸 <code>SCTLR_EL1.<b>SA</b></code> 管，資料對齊歸記憶體型�
 <div class="callout myth">
 <span class="lbl">直覺 10 —— 關於「拿掉它會壞嗎」這個判準本身</span>
 <p><strong>「我加了 <code>-mgeneral-regs-only</code>，因為拿掉它就會卡在 <code>0x200</code>」</strong></p>
-<p>第 9 節那個 trap 是真的，GDB 現場也是真的。但它是在一份<strong>暫時的自我測試</strong>裡發生的，
+<p>第 9 節那個 trap 是真的，GDB 現場也是真的。但它是在一份<strong>臨時的測試程式</strong>裡發生的，
 而那份測試不會進版控。</p>
 <p>但<strong>第一版</strong>要 commit 的那棵樹裡，<code>kernel_main</code> 印字用的是 <code>uart_puts</code>，
 <strong>一次都沒有呼叫 <code>printf</code></strong>。實測那一版：</p>
@@ -1835,15 +2233,11 @@ _start 的第一條指令：
 <figcaption>加了 <code>printf</code> 之後，最深呼叫鏈用掉 416 bytes，佔 64 KB 堆疊的 0.63%。實測自 <code>gcc -fstack-usage</code></figcaption>
 </figure>
 
-
 <h3>第 8、9 節的每一個數字，與量法</h3>
 
 <p>下表是 <code>lib/string.c</code> 與 <code>lib/printf.c</code> 這兩包量到的全部數字。
 「怎麼量的」那一欄寫出重現方式，因為<strong>其中好幾個會隨編譯旗標改變</strong>——
 只抄數字不抄條件，換個旗標就對不上（第 10 節直覺 6 與直覺 9 就是這樣來的）。</p>
-
-
-
 
 <div class="tbl">
 <table>
@@ -1862,6 +2256,23 @@ _start 的第一條指令：
 <tr><td>FP 狀態 vs 整數狀態</td><td>520 bytes vs 264 bytes；兩者相加 784 = 264 的 2.97 倍</td><td>32×16+4+4 對 31×8+8+8</td></tr>
 <tr><td>拿掉 <code>-mgeneral-regs-only</code>（<code>kernel_main</code> 用 <code>printf</code>）</td><td>開機<strong>完全空白</strong></td><td>QEMU <code>-serial file:</code></td></tr>
 <tr><td>加上 <code>printf</code> 之後的體積</td><td><code>.text</code> 0x228 → 0x3a8 → <strong>0xae8</strong></td><td><code>readelf -SW</code>，三段各建一次</td></tr>
+<tr><td><code>printf("x=%05d\n", -42)</code> 的回傳值與線上位元組</td><td>回傳 8；線上 9 byte <code>78 3d 2d 30 30 34 32 0d 0a</code>（<code>\r</code> 不計入）</td><td>QEMU <code>-serial file:</code> 再 <code>xxd</code></td></tr>
+<tr><td><code>lib/printf.c</code> 裡碰暫存器的地方</td><td><code>mmio</code> 出現 0 次；整個核心只有 <code>uart_putc_raw</code> 寫 DR</td><td><code>grep</code></td></tr>
+<tr><td><code>%05c</code>／<code>%05s</code></td><td>字面值：<code>'0' flag used with ‘%c’</code> 編譯失敗；用非 <code>const</code> 陣列當格式：<code>[    Z] [   hi]</code>，補零記號被忽略</td><td>編譯一次；QEMU 跑一次</td></tr>
+<tr><td><code>[%20p]</code> 配 <code>0x40000000</code></td><td><code>[0x0000000040000000]</code>，寬度被忽略</td><td>QEMU</td></tr>
+<tr><td>拿掉 <code>case '\0'</code> 的 <code>p--</code></td><td>有：<code>AB</code> 回傳 2；沒有：<code>ABZZ</code> 回傳 4</td><td>格式字串用非 <code>const</code> 陣列並暫時關掉 <code>-Wformat-security</code>，<code>'\0'</code> 後刻意放 <code>ZZ</code></td></tr>
+<tr><td><code>case</code> 標籤後直接宣告變數</td><td><code>-std=c17 -pedantic</code> 警告；<code>-std=c2x</code> 不警告；不加 <code>-pedantic</code> 都放行</td><td>最小檔案換 <code>-std</code> 各編一次</td></tr>
+<tr><td>「中」在原始碼、<code>.rodata</code>、線上</td><td>三處都是 <code>e4 b8 ad</code></td><td><code>xxd</code>、<code>objdump -s -j .rodata</code></td></tr>
+<tr><td><code>strlen</code> 與 <code>%6s</code> 對中文</td><td><code>strlen</code> 1／3／6（A／中／中文）；<code>[%6s]</code> 配「中文」一個空白都不補</td><td>QEMU</td></tr>
+<tr><td><code>printf("%c", '中')</code></td><td><code>error: multi-character character constant</code></td><td>編譯</td></tr>
+<tr><td><code>-fexec-charset</code></td><td>UTF-8 → <code>e4 b8 ad</code>；BIG5 → <code>a4 a4</code></td><td><code>objdump -s -j .rodata</code></td></tr>
+<tr><td><code>va_arg(ap, char)</code></td><td><code>error: ‘char’ is promoted to ‘int’ when passed through ‘...’</code>；不加 <code>-Werror</code> 時該行變成 <code>brk #0x3e8</code></td><td>編譯；拿掉 <code>-Werror</code> 後 <code>objdump -d</code></td></tr>
+<tr><td>傳 <code>long</code>、用 <code>va_arg(ap, int)</code> 拿</td><td>0 個診斷</td><td>編譯</td></tr>
+<tr><td><code>format</code> 屬性檢查哪些格式字串</td><td>字面值、<code>const</code> 陣列：檢查；<code>const char *</code> 指標、非 <code>const</code> 陣列：不檢查</td><td>同一個 <code>[%05c]</code> 換四種寫法各編一次</td></tr>
+<tr><td><code>printf("%d %d", 10, 20)</code> 的參數</td><td>格式字串在 <code>x0</code>、10 在 <code>w1</code>、20 在 <code>w2</code></td><td><code>objdump -dr</code></td></tr>
+<tr><td><code>'中'</code> 不加 <code>-Werror</code></td><td><code>warning: multi-character character constant [-Wmultichar]</code>，編譯成功</td><td>編譯</td></tr>
+<tr><td>有 <code>-mgeneral-regs-only</code> 時寫 <code>float</code>／<code>double</code></td><td><code>-O0</code> 下，區域變數、運算、有本體的 <code>double</code> 函式：編譯失敗（<code>incompatible with the use of floating-point types</code>）；編譯期常數、<code>sizeof(float)</code>、檔案範圍 <code>float gx = 1.5f</code>、只有宣告的函式：通過。<code>float x = 1.5f;</code> 在 <code>-O1</code>／<code>-O2</code> 變數被刪掉時也通過</td><td>七種寫法逐一編譯，通過的再用 <code>objdump</code> 數浮點指令（0 條）</td></tr>
+<tr><td>拿掉旗標，執行期做浮點運算</td><td>檔案範圍 <code>int seed</code>、用 <code>uart_puts</code> 印：印出 <code>before float</code> 後停住，<code>ELR_EL1</code> 指向 <code>ldr s0, [x0]</code>；seed 改區域變數：<code>ldr s0, [sp, #28]</code>；（加不加 <code>volatile</code>，<code>-O0</code> 下 <code>kernel_main</code> 指令完全相同）改用 <code>printf</code> 印：序列埠全空，停在 <code>printf+40</code>。三者 <code>ESR_EL1</code> 都是 <code>0x1fe00000</code></td><td>三個版本各跑一次 QEMU；GDB <code>break *0x200</code>；<code>nm</code> 對 <code>seed</code> 位址</td></tr>
 </table>
 </div>
 
@@ -1895,7 +2306,7 @@ _start 的第一條指令：
   <li><strong>唯一能驗證的平台，可能剛好是看不出錯的那個。</strong> 鮑率的捨去 vs 四捨五入在 QEMU 上完全一致，只在真機的時脈上分岔。<strong>「測過了」和「在會出錯的條件下測過了」是兩件事。</strong></li>
   <li><strong>一個看起來完整的抽象層，比一個明說有缺口的危險。</strong> <code>platform.h</code> 說「驅動不用改」是真的，但沒說 GPIO muxing 得另外做 —— 讀者會在真板子上得到全黑畫面，然後不知道從哪查起。</li>
   <li><strong>搞錯「是誰在保護你」，那個保護消失時你不會發現。</strong> 直覺 6 和直覺 7 是同一個誤解的兩種表現：以為 gcc 認得 <code>memset</code> 這些名字會幫忙把關，實際上 <code>-ffreestanding</code> 早就把那整套關掉了。對照組要換的是<strong>你懷疑的那個變因</strong>，不是你手邊剛好有的設定。</li>
-  <li><strong>「拿掉它會壞嗎」問的是「在要交付的那棵樹上」。</strong> <code>-mgeneral-regs-only</code> 在實驗裡救了一次當機，但在要 commit 的樹上，<code>printf</code> 一次都沒被呼叫 —— 沒有呼叫者的程式碼，它的保護措施也一樣沒有呼叫者。</li>
+  <li><strong>「拿掉它會壞嗎」問的是「在要交付的那棵樹上」。</strong> <code>-mgeneral-regs-only</code> 在實驗裡救了一次當機，但在第一版要 commit 的樹上，<code>printf</code> 一次都沒被呼叫（後來開機那行改用 <code>printf</code> 才補上） —— 沒有呼叫者的程式碼，它的保護措施也一樣沒有呼叫者。</li>
 </ol>
 
 <h2 id="s13"><span class="num">13</span>一頁式小抄</h2>
@@ -2026,8 +2437,23 @@ CPACR_EL1.FPEN  bits[21:20]   0b00 = EL0/EL1 一律 trap（<b>重設值</b>）
 踩到就是：pc=0x200、ESR_EL1=0x1fe00000
           EC = bits[31:26] = 0x07   FP/SIMD 被 FPEN 擋下
 
-解法：-mgeneral-regs-only（Linux 也是這樣做）
-      別在 boot.S 開 FPEN —— 那要付 520 bytes/次中斷的存檔成本</code></pre>
+解法：-mgeneral-regs-only（Linux arm64 也全域加；需要浮點的檔案個別拿掉，
+      再包 kernel_fpu_begin/end）
+      別在 boot.S 開 FPEN —— 只要中斷裡可能碰 FP，每次中斷都得存 520 bytes
+
+本專案裡不能用浮點：有旗標是編譯錯誤（-O0），沒旗標是執行到就 trap
+要算小數用定點數：固定乘上一個倍數、用整數存（鮑率除數 13.0208 → 以 1/64 為單位存成 833 = 13 又 1/64）</code></pre>
+
+<h3>printf 的骨架</h3>
+<pre><code>printf    逐字讀模板：普通字 emit；遇到 % 讀「補零記號、寬度、轉換字元」
+put_num   整數 → 字元：取最後一位、去掉最後一位（結果是反的）→ 負號 → 補位 → 反著送
+put_str   strlen 算長度 → 左邊補空白 → 逐字送
+pad       送 n 個相同字元，n &lt;= 0 不送
+emit      送 1 個字元並計數 → uart_putc → uart_putc_raw → 寫 DR
+
+邊讀邊送，從不先拼好整句。printf.c 本身不碰暫存器。
+回傳值不含 uart_putc 補的 \r：printf("x=%05d\n", -42) 回傳 8，線上 9 byte
+%c、%s 只補空白；%p 固定 0x + 16 位，寬度被忽略</code></pre>
 
 <h3>printf 的支援範圍</h3>
 <pre><code>支援   %c %s %d %u %x %p %%    ＋ '0' 與最小寬度，例如 %08x
@@ -2038,8 +2464,16 @@ CPACR_EL1.FPEN  bits[21:20]   0b00 = EL0/EL1 一律 trap（<b>重設值</b>）
 
        printf("%016lx", esr)  印出四個字元 %lx，不是那個值
 
-format(printf,1,2) 屬性只檢查<b>字面值</b>的<b>型別</b>，
+format(printf,1,2) 屬性只檢查<b>編譯期看得到內容</b>（字面值、const 陣列）的<b>型別</b>，
 擋不住「這個 printf 沒實作這個規格」。</code></pre>
+<h3>印中文</h3>
+<pre><code>printf 和 UART 不轉編碼，只搬 byte；認字的是終端機
+A = 41（1 byte）        中 = e4 b8 ad（UTF-8，3 byte）
+
+strlen("中") = 3        寬度以 byte 計，%6s 對中文會對不齊
+%c 不能放 '中'          error: multi-character character constant
+UTF-8 多 byte 字元的每個 byte 都 ≥ 0x80 → 不會撞到 \n（0x0a）或 \0（0x00）
+-fexec-charset=BIG5 讓「中」存成 a4 a4；兩端編碼沒約好 = 亂碼</code></pre>
 
 <h3>查位址</h3>
 <pre><code>make dtb                     讓 QEMU 吐出 device tree
