@@ -17,10 +17,10 @@ MACHINE_EL2 := virt,virtualization=on
 GDB     := gdb-multiarch
 
 # 大寫 .S 才會過 C 前處理器（小寫 .s 不會）
-SRC := kernel/boot.S kernel/start.c drivers/uart/pl011.c lib/string.c
+SRC := kernel/boot.S kernel/start.c drivers/uart/pl011.c lib/string.c lib/printf.c
 # header 也要列：少了它，改完 platform.h 的位址 make 會說「沒事做」，
 # 產出的 md5 一模一樣 —— 跟漏列 $(LD) 是同一種失敗
-HDR := include/mmio.h include/platform.h include/uart.h include/string.h
+HDR := include/mmio.h include/platform.h include/uart.h include/string.h include/printf.h
 LD  := linker/kernel-qemu.ld
 
 # 每個旗標對應一個「拿掉就會出現」的失敗：
@@ -29,8 +29,13 @@ LD  := linker/kernel-qemu.ld
 #   -static          別產生需要動態連結器的執行檔，裸機沒有那個東西
 #   -Wl,-T           用我們的佈局，不是 ld 內建的
 #   --build-id=none  讓 .text 從 0x40000000 開始；否則 raw binary 首指令是 udf
+#   -mgeneral-regs-only
+#                    別產生 FP/SIMD 指令。CPACR_EL1.FPEN 重設是 0b00，EL1 碰
+#                    q 暫存器一律 trap。-O0 下可變參數序言會存 q0-q7，所以
+#                    kernel_main 的第一個 printf 就會卡在 0x200，開機一個字
+#                    都印不出來（ESR_EL1=0x1fe00000，EC=0x07）
 WARN  := -Wall -Wextra -Werror
-FLAGS := -ffreestanding -nostdlib -static -Iinclude -Wl,-T,$(LD) -Wl,--build-id=none
+FLAGS := -ffreestanding -nostdlib -static -mgeneral-regs-only -Iinclude -Wl,-T,$(LD) -Wl,--build-id=none
 
 all: build/kernel.elf
 

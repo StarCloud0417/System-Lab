@@ -5,6 +5,7 @@
  * docs/guide/m1-boot-flow.html §7 §8
  */
 
+#include "printf.h"
 #include "uart.h"
 
 /* Uninitialised, so it lives in .bss. Reading it as 0 is the only evidence
@@ -21,7 +22,7 @@ static void bump(void)
 void kernel_main(void)
 {
     uart_init();
-    uart_puts("Hello, AArch64 from EL1\n");
+    printf("Hello, AArch64 from EL1\n");
 
     /* boot_counter is still what 'make debug' checks to prove .bss was
      * cleared, and calling bump() is what keeps the stack load-bearing. */
