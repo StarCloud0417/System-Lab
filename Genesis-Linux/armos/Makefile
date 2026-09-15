@@ -17,10 +17,10 @@ MACHINE_EL2 := virt,virtualization=on
 GDB     := gdb-multiarch
 
 # 大寫 .S 才會過 C 前處理器（小寫 .s 不會）
-SRC := kernel/boot.S kernel/start.c drivers/uart/pl011.c
+SRC := kernel/boot.S kernel/start.c drivers/uart/pl011.c lib/string.c
 # header 也要列：少了它，改完 platform.h 的位址 make 會說「沒事做」，
 # 產出的 md5 一模一樣 —— 跟漏列 $(LD) 是同一種失敗
-HDR := include/mmio.h include/platform.h include/uart.h
+HDR := include/mmio.h include/platform.h include/uart.h include/string.h
 LD  := linker/kernel-qemu.ld
 
 # 每個旗標對應一個「拿掉就會出現」的失敗：
